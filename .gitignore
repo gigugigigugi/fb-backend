@@ -1,0 +1,24 @@
+# Go binaries
+*.exe
+*.out
+*.test
+
+# Go dependency vendors
+/vendor/
+
+# Go workspace file
+/go.work
+
+# Documentation directory to ignore
+/fb2025_doc/
+
+# Environment files
+.env*
+
+# OS-generated files
+.DS_Store
+Thumbs.db
+
+# IDE-specific
+.idea/
+.vscode/

@@ -11,7 +11,7 @@
     pkgs.nodePackages.nodemon
   ];
   # Sets environment variables in the workspace
-  env = {};
+  env = { };
   idx = {
     # Search for the extensions you want on https://open-vsx.org/ and use "publisher.id"
     extensions = [
@@ -21,7 +21,7 @@
     workspace = {
       onCreate = {
         # Open editors for the following files by default, if they exist:
-        default.openFiles = ["server.go"];
+        default.openFiles = [ "backend/cmd/main.go" ];
       };
     };
     # Enable previews and customize configuration
@@ -31,10 +31,14 @@
         web = {
           command = [
             "nodemon"
-            "--signal" "SIGHUP"
-            "-w" "."
-            "-e" "go,html"
-            "-x" "go run server.go -addr localhost:$PORT"
+            "--signal"
+            "SIGHUP"
+            "-w"
+            "."
+            "-e"
+            "go,html"
+            "-x"
+            "cd backend && go run cmd/main.go -addr localhost:$PORT"
           ];
           manager = "web";
         };
