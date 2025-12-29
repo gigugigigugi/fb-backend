@@ -10,7 +10,7 @@ import (
 
 // AppConfig 全局配置结构体
 type AppConfig struct {
-	Env  string // dev, prod, test
+	Env  string // debug, release, test
 	Port string // 8080
 
 	DB  DBConfig
@@ -32,8 +32,8 @@ var App *AppConfig
 // Load 初始化配置
 func Load() {
 	// 1. 尝试加载 .env 文件，并处理错误
-	env := getEnv("GIN_MODE", "dev")
-	if err := godotenv.Load(); err != nil && env == "dev" {
+	env := getEnv("GIN_MODE", "debug")
+	if err := godotenv.Load(); err != nil && env == "debug" {
 		log.Println("Warning: .env file not found, using system environment variables")
 	}
 

@@ -16,7 +16,7 @@ import (
 func main() {
 	// 在程序启动时，首先显式加载所有配置
 	config.Load()
-
+	fmt.Println("1111111111")
 	// 1. 基于加载的配置初始化日志
 	logger.Init(config.App.Env)
 
@@ -38,7 +38,7 @@ func main() {
 	router.SetupRouter(r)
 
 	// 3. 从加载的配置中获取端口号
-	slog.Info("Server starting",
+	slog.Debug("Server starting",
 		slog.String("port", config.App.Port),
 		slog.String("env", config.App.Env),
 	)

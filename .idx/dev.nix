@@ -1,30 +1,41 @@
-# To learn more about how to use Nix to configure your environment
-# see: https://developers.google.com/idx/guides/customize-idx-env
 { pkgs, ... }: {
-  # Which nixpkgs channel to use.
-  channel = "unstable"; # or "unstable"
-  # Use https://search.nixos.org/packages to find packages
+  channel = "unstable";
+
+  # 1. Add docker-compose to the environment's packages
   packages = [
     pkgs.go
     pkgs.gcc
     pkgs.nodejs_20
     pkgs.nodePackages.nodemon
+    pkgs.docker
+    pkgs.docker-compose # Makes the `docker-compose` command available
   ];
-  # Sets environment variables in the workspace
-  env = { };
+
+  # 3. Set the environment variables your Go application needs
+  env = {
+    # This DSN is for your Go app running in the preview (via nodemon).
+    # It connects to the port that the Docker container exposes to `localhost`.
+    DB_DSN = "postgres://user:password@localhost:5432/football_db?sslmode=disable";
+    GIN_MODE = "debug";
+    JWT_SECRET = "a-secure-secret-for-testing-from-compose";
+  };
+
   idx = {
-    # Search for the extensions you want on https://open-vsx.org/ and use "publisher.id"
     extensions = [
       "golang.go"
       "google.gemini-cli-vscode-ide-companion"
+      "ms-azuretools.vscode-docker"
     ];
+
     workspace = {
+      # We are removing the `onStart` hook to simplify things.
+      # You will run the docker-compose command manually.
       onCreate = {
-        # Open editors for the following files by default, if they exist:
-        default.openFiles = [ "backend/cmd/main.go" ];
+        default.openFiles = ["backend/cmd/main.go" "docker-compose.yml"];
       };
     };
-    # Enable previews and customize configuration
+
+    # Your original preview configuration is kept exactly as it was.
     previews = {
       enable = true;
       previews = {

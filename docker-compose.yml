@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  # 1. 数据库服务
+  db:
+    image: postgres:15-alpine
+    container_name: football_db_test
+    restart: always
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: football_db
+    ports:
+      - "5432:5432" # 暴露端口，方便您用本地工具连接查看数据
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      # 自动初始化数据库脚本
+      # 只要把 sql 文件放到这个目录，容器首次启动时会自动执行
+      - ./backend/sql/init.sql:/docker-entrypoint-initdb.d/init.sql
+
+  # 2. 后端服务
+  backend:
+    build:
+      context: ./backend # Dockerfile 所在的目录
+      dockerfile: Dockerfile
+    container_name: football_backend_test
+    restart: unless-stopped # 容器退出时自动重启，除非是手动停止
+    depends_on:
+      - db # 明确声明依赖，确保 backend 在 db 启动之后再启动
+    ports:
+      - "8080:8080" # 将宿主机的 8080 端口映射到容器的 8080 端口
+    environment:
+      # Gin 运行模式
+      GIN_MODE: debug
+      # 数据库连接字符串 (DSN)。'db' 是上面定义的数据库服务的名称，
+      # Docker Compose 会自动将其解析为数据库容器的内部 IP 地址。
+      DB_DSN: "postgres://user:password@db:5432/football_db?sslmode=disable"
+      # JWT 密钥 (从环境变量读取比硬编码在代码里更安全)
+      JWT_SECRET: "a-secure-secret-for-testing-from-compose"
+      JWT_EXP_HOURS: 72
+      # 应用监听的端口，与 Dockerfile 中的 ENV PORT 保持一致
+      PORT: 8080
+
+volumes:
+  db_data:
