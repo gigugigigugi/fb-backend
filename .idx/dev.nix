@@ -1,55 +1,64 @@
 { pkgs, ... }: {
   channel = "unstable";
 
-  # 1. Add docker-compose to the environment's packages
   packages = [
     pkgs.go
     pkgs.gcc
     pkgs.nodejs_20
     pkgs.nodePackages.nodemon
-    pkgs.docker
-    pkgs.docker-compose # Makes the `docker-compose` command available
+    pkgs.postgresql_15
   ];
 
-  # 3. Set the environment variables your Go application needs
   env = {
-    # This DSN is for your Go app running in the preview (via nodemon).
-    # It connects to the port that the Docker container exposes to `localhost`.
-    DB_DSN = "postgres://user:password@localhost:5432/football_db?sslmode=disable";
+    # 2. 统一 DSN 格式
+    DB_DSN = "host=127.0.0.1 user=postgres dbname=football_db sslmode=disable";
     GIN_MODE = "debug";
-    JWT_SECRET = "a-secure-secret-for-testing-from-compose";
+    JWT_SECRET = "a-secure-secret-for-local-idx";
+    PORT = "8080";
   };
 
   idx = {
     extensions = [
       "golang.go"
       "google.gemini-cli-vscode-ide-companion"
-      "ms-azuretools.vscode-docker"
+      "cweijan.vscode-postgresql-client2"
     ];
 
     workspace = {
-      # We are removing the `onStart` hook to simplify things.
-      # You will run the docker-compose command manually.
       onCreate = {
-        default.openFiles = ["backend/cmd/main.go" "docker-compose.yml"];
+        # 3. 自动初始化数据库逻辑
+        setup-db = ''
+          # 循环检查 Postgres 是否就绪
+          echo "Waiting for PostgreSQL to be ready..."
+          until pg_isready -h 127.0.0.1; do
+            sleep 1
+          done
+
+          # 创建数据库 (如果不存在)
+          # 注意: IDX 环境中默认用户可能是 'postgres' 或当前用户名
+          psql -h 127.0.0.1 -U postgres -tc "SELECT 1 FROM pg_database WHERE datname = 'football_db'" | grep -q 1 || \
+          psql -h 127.0.0.1 -U postgres -c "CREATE DATABASE football_db"
+
+          # 运行初始化脚本
+          echo "Running init.sql..."
+          psql -h 127.0.0.1 -U postgres -d football_db -f backend/sql/init.sql
+          
+          echo "Database initialization completed."
+        '';
+        default.openFiles = [ "backend/cmd/main.go" "backend/sql/init.sql" ];
       };
     };
 
-    # Your original preview configuration is kept exactly as it was.
     previews = {
       enable = true;
       previews = {
         web = {
           command = [
             "nodemon"
-            "--signal"
-            "SIGHUP"
-            "-w"
-            "."
-            "-e"
-            "go,html"
-            "-x"
-            "cd backend && go run cmd/main.go -addr localhost:$PORT"
+            "--signal" "SIGHUP"
+            "-w" "."
+            "-e" "go,html"
+            "-x" "cd backend && go run cmd/main.go"
           ];
           manager = "web";
         };
