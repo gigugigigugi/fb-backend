@@ -26,17 +26,19 @@ type JWTConfig struct {
 	Exp    int    // 过期时间(小时)
 }
 
-// Global 全局配置实例，其他包直接用 config.App.DB.DSN 访问
+// App 全局配置实例，其他包直接用 config.App.DB.DSN 访问
 var App *AppConfig
 
 // Load 初始化配置
 func Load() {
-	// 1. 尝试加载 .env 文件 (仅在本地开发有效)
-	// 如果文件不存在也不会报错，直接使用系统环境变量
-	_ = godotenv.Load()
+	// 1. 尝试加载 .env 文件，并处理错误
+	env := getEnv("GIN_MODE", "dev")
+	if err := godotenv.Load(); err != nil && env == "dev" {
+		log.Println("Warning: .env file not found, using system environment variables")
+	}
 
 	App = &AppConfig{
-		Env:  getEnv("GIN_MODE", "dev"),
+		Env:  env,
 		Port: getEnv("PORT", "8080"),
 		DB: DBConfig{
 			DSN: getEnv("DB_DSN", ""),

@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"football-backend/common/config" // 导入新的 config 包
+	"football-backend/common/config"
 	"football-backend/common/logger"
 	"football-backend/internal/middleware"
 	"football-backend/internal/router"
@@ -13,13 +13,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// init 函数会在 main 函数执行前自动运行
-func init() {
-	// 在程序启动时，首先加载所有配置
-	config.Load()
-}
-
 func main() {
+	// 在程序启动时，首先显式加载所有配置
+	config.Load()
+
 	// 1. 基于加载的配置初始化日志
 	logger.Init(config.App.Env)
 
@@ -41,7 +38,6 @@ func main() {
 	router.SetupRouter(r)
 
 	// 3. 从加载的配置中获取端口号
-
 	slog.Info("Server starting",
 		slog.String("port", config.App.Port),
 		slog.String("env", config.App.Env),
