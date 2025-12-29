@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"football-backend/common/config"
+	"football-backend/common/database"
 	"football-backend/common/logger"
 	"football-backend/internal/middleware"
 	"football-backend/internal/router"
@@ -16,10 +17,10 @@ import (
 func main() {
 	// 在程序启动时，首先显式加载所有配置
 	config.Load()
-	fmt.Println("1111111111")
 	// 1. 基于加载的配置初始化日志
 	logger.Init(config.App.Env)
-
+	// 初始化数据库连接
+	database.Init(config.App.DB.DSN)
 	// 2. 基于加载的配置设置 Gin 框架的运行模式
 	if config.App.Env == "prod" {
 		gin.SetMode(gin.ReleaseMode)
