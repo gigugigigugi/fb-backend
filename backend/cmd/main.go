@@ -7,25 +7,47 @@ import (
 	"football-backend/common/logger"
 	"football-backend/internal/middleware"
 	"football-backend/internal/router"
+	"football-backend/internal/service"
 	"log/slog"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/binding"
+	"github.com/go-playground/validator/v10"
 )
 
 func main() {
+	// 初始化时区设置，确保整个应用基于日本时间或者强制 UTC
+	loc, err := time.LoadLocation("Asia/Tokyo")
+	if err != nil {
+		slog.Error("Failed to load timezone", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	time.Local = loc
+
 	// 在程序启动时，首先显式加载所有配置
 	config.Load()
 	// 1. 基于加载的配置初始化日志
 	logger.Init(config.App.Env)
 	// 初始化数据库连接
-	database.Init(config.App.DB.DSN)
+	repo := database.Init(config.App.DB.DSN)
+
+	// 初始化业务服务 (单例模式)
+	matchSvc := service.NewMatchService(repo)
+	teamSvc := service.NewTeamService(repo)
 	// 2. 基于加载的配置设置 Gin 框架的运行模式
 	if config.App.Env == "prod" {
 		gin.SetMode(gin.ReleaseMode)
 	} else {
 		gin.SetMode(gin.DebugMode)
+	}
+
+	// 注册 Validator
+	if v, ok := binding.Validator.Engine().(*validator.Validate); ok {
+		// 这里未来可以注册自定义的 tag 校验器比如: v.RegisterValidation("xxx", xxxFunc)
+		_ = v
 	}
 
 	// 创建 Gin 引擎
@@ -36,7 +58,7 @@ func main() {
 	r.Use(gin.Recovery())
 
 	// 设置路由
-	router.SetupRouter(r)
+	router.SetupRouter(r, matchSvc, teamSvc)
 
 	// 3. 从加载的配置中获取端口号
 	slog.Debug("Server starting",

@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"gorm.io/datatypes"
+	"gorm.io/gorm"
 )
 
 // User 用户模型
@@ -16,6 +17,7 @@ type User struct {
 	Reputation   int            `gorm:"default:100" json:"reputation"`
 	Stats        datatypes.JSON `gorm:"type:jsonb;default:'{}'" json:"stats"` // 游戏化统计: {"mvp": 5, "badges": []}
 	CreatedAt    time.Time      `gorm:"default:CURRENT_TIMESTAMP" json:"created_at"`
+	DeletedAt    gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
 // TableName 指定数据库表名

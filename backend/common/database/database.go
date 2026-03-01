@@ -9,17 +9,20 @@ import (
 	gormlogger "gorm.io/gorm/logger"
 )
 
-// DB 全局数据库连接实例
+// 为了兼容当前已写好的基于 database.DB 的代码，这里我们可以临时保留 DB（但打上不推荐使用的注记），
+// 或者你也完全可以将现有业务模块中用到 database.DB 的地方也重构掉（通过依赖注入传入 Repository）。
+// 在此演示：新代码请统一使用 GlobalRepo
 var DB *gorm.DB
 
-// Init 初始化 Gorm 的 Postgres 连接
-func Init(dsn string) {
+// Init 初始化数据库仓储
+func Init(dsn string) Repository {
+	return initPostgres(dsn)
+}
+
+func initPostgres(dsn string) Repository {
 	var err error
 
-	// 使用 Gorm 自带的默认 Logger 并设置为 Info 级别，以便在开发过程中查看 SQL 语句
 	newLogger := gormlogger.Default.LogMode(gormlogger.Info)
-
-	// 连接数据库
 	DB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{
 		Logger: newLogger,
 	})
@@ -28,16 +31,15 @@ func Init(dsn string) {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
 
-	// 获取底层的 sql.DB 对象来配置连接池
 	sqlDB, err := DB.DB()
 	if err != nil {
 		log.Fatalf("Failed to get database object: %v", err)
 	}
 
-	// 设置连接池参数
 	sqlDB.SetMaxIdleConns(10)
 	sqlDB.SetMaxOpenConns(100)
 	sqlDB.SetConnMaxLifetime(time.Hour)
 
-	log.Println("Database connection initialized successfully")
+	log.Println("Postgres Database connection initialized successfully")
+	return NewPostgresRepository(DB)
 }

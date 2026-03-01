@@ -1,2 +1,41 @@
-# 忽略环境变量文件
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+bin/
+
+# Dependency directories (remove the comment below to include it)
+# vendor/
+
+# Go workspace file
+go.work
+go.work.sum
+
+# env file
 .env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+config.yaml
+
+# IDEs and Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+logs/
+*.log
+
+# build output
+/football-backend
+/build/
+dist/

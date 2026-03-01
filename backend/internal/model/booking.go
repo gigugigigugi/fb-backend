@@ -1,6 +1,10 @@
 package model
 
-import "time"
+import (
+	"time"
+
+	"gorm.io/gorm"
+)
 
 // Booking 报名模型
 type Booking struct {
@@ -15,7 +19,8 @@ type Booking struct {
 	PaymentStatus string `gorm:"size:20;default:'UNPAID'" json:"payment_status"`
 	SubTeam       string `gorm:"size:10;default:''" json:"sub_team"` // 分队: A, B
 
-	CreatedAt time.Time `gorm:"default:CURRENT_TIMESTAMP" json:"created_at"`
+	CreatedAt time.Time      `gorm:"default:CURRENT_TIMESTAMP" json:"created_at"`
+	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
 func (Booking) TableName() string {

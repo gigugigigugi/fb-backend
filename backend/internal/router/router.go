@@ -11,7 +11,7 @@ import (
 )
 
 // SetupRouter configures the routes for the application on the given Gin engine.
-func SetupRouter(r *gin.Engine) {
+func SetupRouter(r *gin.Engine, matchSvc *service.MatchService, teamSvc *service.TeamService) {
 	// 从配置中获取当前环境
 	env := config.App.Env
 
@@ -45,8 +45,7 @@ func SetupRouter(r *gin.Engine) {
 		}
 
 		// 3. 调用业务逻辑
-		svc := service.MatchService{}
-		if err := svc.JoinMatch(matchID, userID); err != nil {
+		if err := matchSvc.JoinMatch(c.Request.Context(), matchID, userID); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
