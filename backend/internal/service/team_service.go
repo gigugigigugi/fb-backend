@@ -35,3 +35,8 @@ func (s *TeamService) CreateTeam(ctx context.Context, creatorID uint, teamName s
 	}
 	return &team, nil
 }
+
+// GetTeam 获取球队信息
+func (s *TeamService) GetTeam(ctx context.Context, teamID uint) (*model.Team, error) {
+	return s.repo.GetTeamByID(ctx, teamID)
+}

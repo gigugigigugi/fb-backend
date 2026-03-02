@@ -5,6 +5,7 @@ import (
 	"errors"
 	"football-backend/common/database"
 	"football-backend/internal/model"
+	"time"
 )
 
 type MatchService struct {
@@ -56,4 +57,60 @@ func (s *MatchService) JoinMatch(ctx context.Context, matchID uint, userID uint)
 		}
 		return txRepo.Create(ctx, &booking)
 	})
+}
+
+// MatchCommonInfo 用于批量创建比赛的基础信息
+type MatchCommonInfo struct {
+	Price      float64
+	MaxPlayers int
+	Format     int
+	Note       string
+}
+
+// MatchSchedule 比赛的时间安排表
+type MatchSchedule struct {
+	StartTime time.Time
+	EndTime   time.Time
+}
+
+// CreateMatchBatch 开启事务批量创建比赛
+func (s *MatchService) CreateMatchBatch(ctx context.Context, teamID uint, venueID uint, info MatchCommonInfo, schedules []MatchSchedule) ([]model.Match, error) {
+	if len(schedules) == 0 {
+		return nil, errors.New("schedules cannot be empty")
+	}
+
+	var createdMatches []model.Match
+
+	err := s.repo.Transaction(ctx, func(txRepo database.Repository) error {
+		for _, sch := range schedules {
+			if sch.EndTime.Before(sch.StartTime) {
+				return errors.New("end time cannot be before start time")
+			}
+
+			newMatch := model.Match{
+				TeamID:     teamID,
+				VenueID:    venueID,
+				Price:      info.Price,
+				MaxPlayers: info.MaxPlayers,
+				Format:     info.Format,
+				Note:       info.Note,
+				StartTime:  sch.StartTime,
+				EndTime:    sch.EndTime,
+				Status:     "RECRUITING",
+			}
+
+			if err := txRepo.Create(ctx, &newMatch); err != nil {
+				return err // Any failure will automatically rollback the entire transaction
+			}
+
+			createdMatches = append(createdMatches, newMatch)
+		}
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return createdMatches, nil
 }
