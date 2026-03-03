@@ -33,8 +33,7 @@ func main() {
 	// 1. 基于加载的配置初始化日志
 	logger.Init(config.App.Env)
 	// 初始化数据库连接
-	_ = database.Init(config.App.DB.DSN)
-	db := database.DB // 获取底层的 *gorm.DB
+	db := database.Init(config.App.DB.DSN)
 
 	// 初始化领域层仓储 (Domain Repositories 具体实现)
 	userRepo := postgres.NewUserRepository(db)
