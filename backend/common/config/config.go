@@ -10,8 +10,9 @@ import (
 
 // AppConfig 全局配置结构体
 type AppConfig struct {
-	Env  string // debug, release, test
-	Port string // 8080
+	Env        string // debug, release, test
+	Port       string // 8080
+	AuthBypass bool   // 是否绕过登录验证 (仅开发期使用)
 
 	DB  DBConfig
 	JWT JWTConfig
@@ -38,8 +39,9 @@ func Load() {
 	}
 
 	App = &AppConfig{
-		Env:  env,
-		Port: getEnv("PORT", "8080"),
+		Env:        env,
+		Port:       getEnv("PORT", "8080"),
+		AuthBypass: getEnvBool("AUTH_BYPASS", false),
 		DB: DBConfig{
 			DSN: getEnv("DB_DSN", ""),
 		},
@@ -67,6 +69,15 @@ func getEnv(key, fallback string) string {
 func getEnvInt(key string, fallback int) int {
 	strValue := getEnv(key, "")
 	if value, err := strconv.Atoi(strValue); err == nil {
+		return value
+	}
+	return fallback
+}
+
+// getEnvBool 获取布尔环境变量
+func getEnvBool(key string, fallback bool) bool {
+	strValue := getEnv(key, "")
+	if value, err := strconv.ParseBool(strValue); err == nil {
 		return value
 	}
 	return fallback

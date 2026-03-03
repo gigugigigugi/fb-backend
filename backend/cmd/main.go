@@ -6,6 +6,7 @@ import (
 	"football-backend/common/database"
 	"football-backend/common/logger"
 	"football-backend/internal/middleware"
+	"football-backend/internal/repository/postgres"
 	"football-backend/internal/router"
 	"football-backend/internal/service"
 	"log/slog"
@@ -32,11 +33,19 @@ func main() {
 	// 1. 基于加载的配置初始化日志
 	logger.Init(config.App.Env)
 	// 初始化数据库连接
-	repo := database.Init(config.App.DB.DSN)
+	_ = database.Init(config.App.DB.DSN)
+	db := database.DB // 获取底层的 *gorm.DB
 
-	// 初始化业务服务 (单例模式)
-	matchSvc := service.NewMatchService(repo)
-	teamSvc := service.NewTeamService(repo)
+	// 初始化领域层仓储 (Domain Repositories 具体实现)
+	userRepo := postgres.NewUserRepository(db)
+	teamRepo := postgres.NewTeamRepository(db)
+	matchRepo := postgres.NewMatchRepository(db)
+	bookingRepo := postgres.NewBookingRepository(db)
+
+	// 初始化业务服务 (单例模式, 依赖精准注入)
+	matchSvc := service.NewMatchService(matchRepo, bookingRepo, teamRepo)
+	teamSvc := service.NewTeamService(teamRepo)
+	authSvc := service.NewAuthService(userRepo)
 	// 2. 基于加载的配置设置 Gin 框架的运行模式
 	if config.App.Env == "prod" {
 		gin.SetMode(gin.ReleaseMode)
@@ -58,7 +67,7 @@ func main() {
 	r.Use(gin.Recovery())
 
 	// 设置路由
-	router.SetupRouter(r, matchSvc, teamSvc)
+	router.SetupRouter(r, matchSvc, teamSvc, authSvc)
 
 	// 3. 从加载的配置中获取端口号
 	slog.Debug("Server starting",

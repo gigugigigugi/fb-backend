@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"log"
 
@@ -9,18 +8,22 @@ import (
 	"football-backend/common/database"
 	"football-backend/internal/model"
 
-	"gorm.io/gorm"
+	"time"
 )
 
 func main() {
 	// 1. 加载配置 (会自动读取 .env 文件的 DB_DSN)
 	config.Load()
-	repo := database.Init(config.App.DB.DSN)
-	db := repo.GetGormDB()
+	db := database.Init(config.App.DB.DSN)
 
-	// 2. 自动迁移所有的模型
-	// 由于我们用的是全新创建的 docker 数据库，里面全是空的
-	// Gorm 的 AutoMigrate 会根据我们的 struct 完美生成包含依赖关联的数据表架构！
+	// 2. 在执行 AutoMigrate 之前，由于结构发生过破坏性变更（比如由 mobile 变成了必填的 email）
+	// AutoMigrate 无法为存量的 null email 记录添加 NOT NULL 约束。
+	// 所以我们在这里采用暴力重置：直接 DROP TABLE 然后再建。
+	// [注意] 仅限于 cmd/seed (开发测试阶段) 这么玩！
+	log.Println("Dropping old tables to avoid migration conflicts...")
+	db.Migrator().DropTable(&model.Match{}, &model.TeamMember{}, &model.Team{}, &model.User{}, &model.Booking{}, &model.Venue{}, &model.Comment{})
+
+	// 3. 自动迁移所有的模型
 	log.Println("Starting Auto Migration...")
 	err := db.AutoMigrate(
 		&model.User{},
@@ -140,16 +143,61 @@ func main() {
 		},
 	}
 
-	// 4. 清理旧数据并插入新数据
-	db.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Delete(&model.Venue{})
+	// （第 5 步：由于上面的 DropTable 已经清空了数据，这段清理旧数据的代码就可以删除了）
 
-	for _, venue := range venues {
-		if err := repo.Create(context.Background(), &venue); err != nil {
-			log.Printf("Failed to insert venue %s: %v", venue.Name, err)
+	for i := range venues {
+		if err := db.Create(&venues[i]).Error; err != nil {
+			log.Printf("Failed to insert venue %s: %v", venues[i].Name, err)
 		} else {
-			fmt.Printf("Inserted venue: %s\n", venue.Name)
+			fmt.Printf("Inserted venue: %s\n", venues[i].Name)
 		}
 	}
 
-	fmt.Println("\n🎉 Seed completely successfully! 10 realistic Tokyo venues have been created in the database.")
+	// 5. 生成一个队长用户
+	captain := model.User{
+		Email:        "admin@football.com",
+		PasswordHash: "mock_hash",
+		Nickname:     "测试队长",
+		Avatar:       "https://google.com/avatar.png",
+	}
+	db.Create(&captain)
+
+	// 6. 生成一支队伍
+	team := model.Team{
+		Name:      "FC 东京测试队",
+		Slogan:    "We are the champions!",
+		CaptainID: captain.ID,
+	}
+	db.Create(&team)
+
+	// 7. 批量铺设 20 场未来的比赛数据，打散到不同的场地和时间
+	now := time.Now()
+	for i := 1; i <= 20; i++ {
+		// 让比赛时间在一星期内的不同天随机发散
+		matchTime := now.Add(time.Duration(i*12) * time.Hour)
+
+		venue := venues[i%len(venues)] // 轮流使用创建出的10个场地
+
+		matchStatus := "RECRUITING"
+		if i%4 == 0 {
+			matchStatus = "FULL" // 注入一些假满员数据
+		} else if i%7 == 0 {
+			matchStatus = "CANCELED" // 注入一些已取消数据
+		}
+
+		match := model.Match{
+			TeamID:     team.ID,
+			VenueID:    venue.ID,
+			StartTime:  matchTime,
+			EndTime:    matchTime.Add(2 * time.Hour),
+			Price:      1500.0,
+			MaxPlayers: 14,
+			Format:     []int{5, 7, 11}[i%3], // 循环分配赛制
+			Note:       fmt.Sprintf("这是第%d场友谊赛，大家开心踢球！", i),
+			Status:     matchStatus,
+		}
+		db.Create(&match)
+	}
+
+	fmt.Println("\n🎉 Seed completely successfully! Venues, Teams, Users, and Matches have been initialized.")
 }
