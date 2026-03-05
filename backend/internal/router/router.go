@@ -32,8 +32,8 @@ func SetupRouter(r *gin.Engine, matchSvc *service.MatchService, teamSvc *service
 		})
 	})
 
-	// API 路由组
-	api := r.Group("/api")
+	// API 路由组 (统一前缀为 /api/v1)
+	api := r.Group("/api/v1")
 
 	// 初始化 HTTP Handlers (Controllers)
 	authHandler := handler.NewAuthHandler(authSvc)
@@ -107,6 +107,10 @@ func SetupRouter(r *gin.Engine, matchSvc *service.MatchService, teamSvc *service
 	users := api.Group("/users")
 	{
 		users.GET("/me/bookings", bookingHandler.GetUserBookings)
+		users.POST("/me/verify/email/send", authHandler.SendEmailVerificationCode)
+		users.POST("/me/verify/email/confirm", authHandler.VerifyEmailCode)
+		users.POST("/me/verify/phone/send", authHandler.SendPhoneVerificationCode)
+		users.POST("/me/verify/phone/confirm", authHandler.VerifyPhoneCode)
 	}
 
 	// --- 球队模块路由 (Day 4) ---

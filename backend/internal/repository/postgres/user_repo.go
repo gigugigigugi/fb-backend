@@ -43,6 +43,17 @@ func (r *userRepository) GetUserByEmail(ctx context.Context, email string) (*mod
 	return &user, nil
 }
 
+func (r *userRepository) GetUserByPhone(ctx context.Context, phone string) (*model.User, error) {
+	var user model.User
+	if err := r.db.WithContext(ctx).Where("phone = ?", phone).First(&user).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errors.New("user not found")
+		}
+		return nil, err
+	}
+	return &user, nil
+}
+
 func (r *userRepository) GetUserByGoogleID(ctx context.Context, googleID string) (*model.User, error) {
 	var user model.User
 	if err := r.db.WithContext(ctx).Where("google_id = ?", googleID).First(&user).Error; err != nil {
@@ -52,4 +63,19 @@ func (r *userRepository) GetUserByGoogleID(ctx context.Context, googleID string)
 		return nil, err
 	}
 	return &user, nil
+}
+
+func (r *userRepository) UpdateEmailVerified(ctx context.Context, userID uint, verified bool) error {
+	return r.db.WithContext(ctx).Model(&model.User{}).
+		Where("id = ?", userID).
+		Update("email_verified", verified).Error
+}
+
+func (r *userRepository) UpdatePhoneVerified(ctx context.Context, userID uint, phone string, verified bool) error {
+	return r.db.WithContext(ctx).Model(&model.User{}).
+		Where("id = ?", userID).
+		Updates(map[string]interface{}{
+			"phone":          phone,
+			"phone_verified": verified,
+		}).Error
 }

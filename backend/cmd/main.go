@@ -5,6 +5,7 @@ import (
 	"football-backend/common/config"
 	"football-backend/common/database"
 	"football-backend/common/logger"
+	"football-backend/common/notification"
 	"football-backend/internal/middleware"
 	"football-backend/internal/repository/postgres"
 	"football-backend/internal/router"
@@ -41,8 +42,13 @@ func main() {
 	matchRepo := postgres.NewMatchRepository(db)
 	bookingRepo := postgres.NewBookingRepository(db)
 
+	// 初始化异步通知分发器（用于候补提醒）
+	notifyDispatcher := notification.NewDispatcher(256)
+	notifyDispatcher.RegisterNotifier(notification.NewEmailNotifier())
+	notifyDispatcher.RegisterNotifier(notification.NewSMSNotifier())
+
 	// 初始化业务服务 (单例模式, 依赖精准注入)
-	matchSvc := service.NewMatchService(matchRepo, bookingRepo, teamRepo, userRepo)
+	matchSvc := service.NewMatchService(matchRepo, bookingRepo, teamRepo, userRepo, notifyDispatcher)
 	teamSvc := service.NewTeamService(teamRepo)
 	authSvc := service.NewAuthService(userRepo)
 	// 2. 基于加载的配置设置 Gin 框架的运行模式

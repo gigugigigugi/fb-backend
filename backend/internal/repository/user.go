@@ -1,4 +1,4 @@
-﻿package repository
+package repository
 
 import (
 	"context"
@@ -10,5 +10,8 @@ type UserRepository interface {
 	CreateUser(ctx context.Context, user *model.User) error
 	GetUserByID(ctx context.Context, id uint) (*model.User, error)
 	GetUserByEmail(ctx context.Context, email string) (*model.User, error)
+	GetUserByPhone(ctx context.Context, phone string) (*model.User, error)
 	GetUserByGoogleID(ctx context.Context, googleID string) (*model.User, error)
+	UpdateEmailVerified(ctx context.Context, userID uint, verified bool) error
+	UpdatePhoneVerified(ctx context.Context, userID uint, phone string, verified bool) error
 }

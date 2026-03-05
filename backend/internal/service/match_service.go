@@ -3,8 +3,11 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
+	"football-backend/common/notification"
 	"football-backend/internal/model"
 	"football-backend/internal/repository"
+	"log/slog"
 	"time"
 )
 
@@ -13,15 +16,19 @@ type MatchService struct {
 	bookingRepo repository.BookingRepository
 	teamRepo    repository.TeamRepository
 	userRepo    repository.UserRepository
+	notifier    *notification.Dispatcher
 }
 
+const maxWaitlistSize = 10
+
 // NewMatchService constructor 依赖多领域注入
-func NewMatchService(mRepo repository.MatchRepository, bRepo repository.BookingRepository, tRepo repository.TeamRepository, uRepo repository.UserRepository) *MatchService {
+func NewMatchService(mRepo repository.MatchRepository, bRepo repository.BookingRepository, tRepo repository.TeamRepository, uRepo repository.UserRepository, notifier *notification.Dispatcher) *MatchService {
 	return &MatchService{
 		matchRepo:   mRepo,
 		bookingRepo: bRepo,
 		teamRepo:    tRepo,
 		userRepo:    uRepo,
+		notifier:    notifier,
 	}
 }
 
@@ -69,9 +76,6 @@ func (s *MatchService) JoinMatch(ctx context.Context, matchID uint, userID uint)
 		if err != nil {
 			return err
 		}
-		if int(playersCount) >= match.MaxPlayers {
-			return errors.New("match is full")
-		}
 
 		// 4. 创建记录
 		booking := model.Booking{
@@ -80,13 +84,91 @@ func (s *MatchService) JoinMatch(ctx context.Context, matchID uint, userID uint)
 			Status:        "CONFIRMED",
 			PaymentStatus: "UNPAID",
 		}
+
+		// 如果比赛已经满员，将报名状态设置为等待
+		if int(playersCount) >= match.MaxPlayers {
+			waitingCount, err := txRepo.CountWaitingPlayers(ctx, matchID)
+			if err != nil {
+				return err
+			}
+			if waitingCount >= maxWaitlistSize {
+				return fmt.Errorf("waitlist is full (max %d)", maxWaitlistSize)
+			}
+			booking.Status = "WAITING"
+		}
+
 		return txRepo.CreateBooking(ctx, &booking)
 	})
 }
 
-// CancelBooking 取消报名并触发联动(扣分/替补转正)
+// CancelBooking 取消报名并触发联动(扣分/候补通知)
 func (s *MatchService) CancelBooking(ctx context.Context, bookingID uint, userID uint) error {
-	return s.bookingRepo.CancelBookingTransaction(ctx, bookingID, userID)
+	// 事务内只改状态与查询候补名单；通知属于事务外异步副作用。
+	matchID, waitingUserIDs, err := s.bookingRepo.CancelBookingTransaction(ctx, bookingID, userID)
+	if err != nil {
+		return err
+	}
+
+	// 没有候补或未注入通知器时直接返回，保持主流程成功。
+	if s.notifier == nil || len(waitingUserIDs) == 0 {
+		return nil
+	}
+
+	msg := notification.Message{
+		Subject: "候补可报名提醒",
+		Body:    fmt.Sprintf("比赛 %d 出现空位，请尽快重新报名。", matchID),
+	}
+
+	for _, waitingUserID := range waitingUserIDs {
+		user, userErr := s.userRepo.GetUserByID(ctx, waitingUserID)
+		if userErr != nil {
+			slog.Warn("Skip waitlist notification because user lookup failed",
+				slog.Uint64("match_id", uint64(matchID)),
+				slog.Uint64("user_id", uint64(waitingUserID)),
+				slog.String("error", userErr.Error()),
+			)
+			continue
+		}
+
+		channels := make([]notification.Channel, 0, 2)
+		recipient := notification.Recipient{
+			UserID: user.ID,
+		}
+
+		if user.EmailVerified && user.Email != "" {
+			channels = append(channels, notification.ChannelEmail)
+			recipient.Email = user.Email
+		}
+		if user.PhoneVerified && user.Phone != nil && *user.Phone != "" {
+			channels = append(channels, notification.ChannelSMS)
+			recipient.Phone = *user.Phone
+		}
+		if len(channels) == 0 {
+			slog.Warn("Skip waitlist notification because user has no supported contact",
+				slog.Uint64("match_id", uint64(matchID)),
+				slog.Uint64("user_id", uint64(waitingUserID)),
+			)
+			continue
+		}
+
+		task := notification.Task{
+			MatchID:   matchID,
+			Recipient: recipient,
+			Message:   msg,
+			Channels:  channels,
+		}
+
+		if enqueueErr := s.notifier.Enqueue(task); enqueueErr != nil {
+			// 通知入队失败不回滚取消报名主流程，仅记录错误供后续补偿。
+			slog.Error("Failed to enqueue waitlist notification",
+				slog.Uint64("match_id", uint64(matchID)),
+				slog.Uint64("user_id", uint64(waitingUserID)),
+				slog.String("error", enqueueErr.Error()),
+			)
+		}
+	}
+
+	return nil
 }
 
 // GetUserBookings 查询指定用户的全部行程

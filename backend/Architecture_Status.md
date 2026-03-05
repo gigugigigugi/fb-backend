@@ -72,7 +72,7 @@ sequenceDiagram
 2. **路由的 Handler 封装未搭建完整 (Day 4 等)**：
    * 目前仅跑通了 `/:id/join` 报名的基础 Controller ，尚缺少类似于 `POST /teams` 的新建球队 API 以及 HTTP 传参 JSON 解析和参数校验环节。
 3. **取消报名逻辑 (Booking Cancelation)**：
-   * 涉及到不仅需要把当前排队人的状态改成 \`CANCELED\` ，最复杂的是还需要运用到 DB 长事务，去排队列表寻找一名 \`WAITING\` 成员将他**递补转正**的功能，同时预埋发短信事件。
+   * 涉及到不仅需要把当前报名人的状态改成 \`CANCELED\` ，还需要查询同场次全部 \`WAITING\` 用户并触发邮件/SMS 通知。当前设计不做自动转正，由候补用户收到通知后主动完成占位。
    * 批量赛后结账状态。
 4. **Day 28: Auth 与拦截体系**：
    * 尚未实现利用 \`golang-jwt/v5\` 基于标头 Bearer 发放且安全无状态识别 userID 的机制，登录、登出以及路由白名单黑名单体系未闭环。

@@ -46,6 +46,14 @@ func (r *bookingRepository) CountConfirmedPlayers(ctx context.Context, matchID u
 	return currentPlayers, err
 }
 
+func (r *bookingRepository) CountWaitingPlayers(ctx context.Context, matchID uint) (int64, error) {
+	var waitingPlayers int64
+	err := r.db.WithContext(ctx).Model(&model.Booking{}).
+		Where("match_id = ? AND status = ?", matchID, "WAITING").
+		Count(&waitingPlayers).Error
+	return waitingPlayers, err
+}
+
 func (r *bookingRepository) GetUserBookings(ctx context.Context, userID uint) ([]*model.Booking, error) {
 	var bookings []*model.Booking
 	err := r.db.WithContext(ctx).
@@ -66,8 +74,12 @@ func (r *bookingRepository) GetBookingWithLock(ctx context.Context, bookingID ui
 	return &booking, nil
 }
 
-func (r *bookingRepository) CancelBookingTransaction(ctx context.Context, bookingID uint, userID uint) error {
-	return r.Transaction(ctx, func(txRepo repository.BookingRepository) error {
+func (r *bookingRepository) CancelBookingTransaction(ctx context.Context, bookingID uint, userID uint) (uint, []uint, error) {
+	// 返回给 service 层做异步通知，不在 repo 层直接触发外部副作用。
+	var matchID uint
+	var waitingBookingUserIDs []uint
+
+	err := r.Transaction(ctx, func(txRepo repository.BookingRepository) error {
 		internalRepo := txRepo.(*bookingRepository)
 		txDB := internalRepo.db.WithContext(ctx)
 
@@ -75,6 +87,8 @@ func (r *bookingRepository) CancelBookingTransaction(ctx context.Context, bookin
 		if err != nil {
 			return err
 		}
+		matchID = booking.MatchID
+
 		if booking.UserID != userID && booking.Status != "CANCELED" {
 			return errors.New("unauthorized or invalid booking record")
 		}
@@ -97,16 +111,23 @@ func (r *bookingRepository) CancelBookingTransaction(ctx context.Context, bookin
 		}
 
 		if oldStatus == "CONFIRMED" && timeLeft > 0 {
-			var waitingBookingUserIDs []uint
-			err := txDB.Model(&model.Booking{}).
+			const waitlistNotifyLimit = 10
+			// 当前策略：只收集候补用户用于通知，不在事务中执行“自动转正”。
+			if err := txDB.Model(&model.Booking{}).
 				Where("match_id = ? AND status = ?", booking.MatchID, "WAITING").
-				Pluck("user_id", &waitingBookingUserIDs).Error
-
-			if err == nil && len(waitingBookingUserIDs) > 0 {
-				// 发送 MQ
+				Order("created_at ASC").
+				Limit(waitlistNotifyLimit).
+				Pluck("user_id", &waitingBookingUserIDs).Error; err != nil {
+				return err
 			}
 		}
 
 		return nil
 	})
+
+	if err != nil {
+		return 0, nil, err
+	}
+
+	return matchID, waitingBookingUserIDs, nil
 }

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"football-backend/common/utils"
 	"football-backend/internal/service"
 	"net/http"
 
@@ -91,4 +92,85 @@ func (h *AuthHandler) GoogleLogin(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "Google Authorized", "data": gin.H{"token": token}})
+}
+
+func (h *AuthHandler) SendEmailVerificationCode(c *gin.Context) {
+	userID, ok := utils.GetUserID(c)
+	if !ok {
+		return
+	}
+
+	if err := h.authSvc.SendEmailVerificationCode(c.Request.Context(), userID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "Email verification code sent"})
+}
+
+func (h *AuthHandler) VerifyEmailCode(c *gin.Context) {
+	userID, ok := utils.GetUserID(c)
+	if !ok {
+		return
+	}
+
+	var req struct {
+		Code string `json:"code" binding:"required,len=6"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "Invalid parameters: " + err.Error()})
+		return
+	}
+
+	if err := h.authSvc.VerifyEmailCode(c.Request.Context(), userID, req.Code); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "Email verified"})
+}
+
+func (h *AuthHandler) SendPhoneVerificationCode(c *gin.Context) {
+	userID, ok := utils.GetUserID(c)
+	if !ok {
+		return
+	}
+
+	var req struct {
+		Phone string `json:"phone" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "Invalid parameters: " + err.Error()})
+		return
+	}
+
+	if err := h.authSvc.SendPhoneVerificationCode(c.Request.Context(), userID, req.Phone); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "Phone verification code sent"})
+}
+
+func (h *AuthHandler) VerifyPhoneCode(c *gin.Context) {
+	userID, ok := utils.GetUserID(c)
+	if !ok {
+		return
+	}
+
+	var req struct {
+		Phone string `json:"phone" binding:"required"`
+		Code  string `json:"code" binding:"required,len=6"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "Invalid parameters: " + err.Error()})
+		return
+	}
+
+	if err := h.authSvc.VerifyPhoneCode(c.Request.Context(), userID, req.Phone, req.Code); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "Phone verified"})
 }

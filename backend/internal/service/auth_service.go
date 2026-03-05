@@ -2,21 +2,39 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
+	"fmt"
 	"football-backend/common/utils"
 	"football-backend/internal/model"
-
 	"football-backend/internal/repository"
+	"log/slog"
+	"math/big"
+	"sync"
+	"time"
 
 	"golang.org/x/crypto/bcrypt"
 )
 
+type verificationRecord struct {
+	Code      string
+	ExpiresAt time.Time
+}
+
 type AuthService struct {
 	repo repository.UserRepository
+
+	mu         sync.Mutex
+	emailCodes map[uint]verificationRecord
+	phoneCodes map[string]verificationRecord
 }
 
 func NewAuthService(repo repository.UserRepository) *AuthService {
-	return &AuthService{repo: repo}
+	return &AuthService{
+		repo:       repo,
+		emailCodes: make(map[uint]verificationRecord),
+		phoneCodes: make(map[string]verificationRecord),
+	}
 }
 
 // RegisterEmail 处理标准邮箱注册
@@ -91,4 +109,132 @@ func (s *AuthService) LoginGoogle(ctx context.Context, googleID, email, name, av
 
 	// 签发自己系统的 Token
 	return utils.GenerateToken(user.ID)
+}
+
+func (s *AuthService) SendEmailVerificationCode(ctx context.Context, userID uint) error {
+	user, err := s.repo.GetUserByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if user.Email == "" {
+		return errors.New("email is empty")
+	}
+
+	code, err := generate6DigitCode()
+	if err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	s.emailCodes[userID] = verificationRecord{
+		Code:      code,
+		ExpiresAt: time.Now().Add(10 * time.Minute),
+	}
+	s.mu.Unlock()
+
+	// 这里是发送占位，后续可替换为真实邮件服务商。
+	slog.Info("Email verification code generated",
+		slog.Uint64("user_id", uint64(userID)),
+		slog.String("email", user.Email),
+		slog.String("code", code),
+	)
+	return nil
+}
+
+func (s *AuthService) VerifyEmailCode(ctx context.Context, userID uint, code string) error {
+	s.mu.Lock()
+	record, ok := s.emailCodes[userID]
+	if !ok {
+		s.mu.Unlock()
+		return errors.New("verification code not found")
+	}
+	if time.Now().After(record.ExpiresAt) {
+		delete(s.emailCodes, userID)
+		s.mu.Unlock()
+		return errors.New("verification code expired")
+	}
+	if record.Code != code {
+		s.mu.Unlock()
+		return errors.New("invalid verification code")
+	}
+	delete(s.emailCodes, userID)
+	s.mu.Unlock()
+
+	return s.repo.UpdateEmailVerified(ctx, userID, true)
+}
+
+func (s *AuthService) SendPhoneVerificationCode(ctx context.Context, userID uint, phone string) error {
+	normalized := utils.NormalizePhone(phone)
+	if !utils.IsValidE164(normalized) {
+		return errors.New("phone must be valid E.164 format")
+	}
+
+	existing, err := s.repo.GetUserByPhone(ctx, normalized)
+	if err == nil && existing != nil && existing.ID != userID {
+		return errors.New("phone already bound to another account")
+	}
+	if err != nil && err.Error() != "user not found" {
+		return err
+	}
+
+	code, err := generate6DigitCode()
+	if err != nil {
+		return err
+	}
+
+	key := phoneCodeKey(userID, normalized)
+	s.mu.Lock()
+	s.phoneCodes[key] = verificationRecord{
+		Code:      code,
+		ExpiresAt: time.Now().Add(10 * time.Minute),
+	}
+	s.mu.Unlock()
+
+	// 这里是发送占位，后续可替换为真实短信服务商。
+	slog.Info("Phone verification code generated",
+		slog.Uint64("user_id", uint64(userID)),
+		slog.String("phone", normalized),
+		slog.String("code", code),
+	)
+	return nil
+}
+
+func (s *AuthService) VerifyPhoneCode(ctx context.Context, userID uint, phone string, code string) error {
+	normalized := utils.NormalizePhone(phone)
+	if !utils.IsValidE164(normalized) {
+		return errors.New("phone must be valid E.164 format")
+	}
+
+	key := phoneCodeKey(userID, normalized)
+	s.mu.Lock()
+	record, ok := s.phoneCodes[key]
+	if !ok {
+		s.mu.Unlock()
+		return errors.New("verification code not found")
+	}
+	if time.Now().After(record.ExpiresAt) {
+		delete(s.phoneCodes, key)
+		s.mu.Unlock()
+		return errors.New("verification code expired")
+	}
+	if record.Code != code {
+		s.mu.Unlock()
+		return errors.New("invalid verification code")
+	}
+	delete(s.phoneCodes, key)
+	s.mu.Unlock()
+
+	return s.repo.UpdatePhoneVerified(ctx, userID, normalized, true)
+}
+
+func phoneCodeKey(userID uint, phone string) string {
+	return fmt.Sprintf("%d:%s", userID, phone)
+}
+
+func generate6DigitCode() (string, error) {
+	n, err := rand.Int(rand.Reader, big.NewInt(1000000))
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%06d", n.Int64()), nil
 }

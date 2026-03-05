@@ -155,10 +155,11 @@ func main() {
 
 	// 5. 生成一个队长用户
 	captain := model.User{
-		Email:        "admin@football.com",
-		PasswordHash: "mock_hash",
-		Nickname:     "测试队长",
-		Avatar:       "https://google.com/avatar.png",
+		Email:         "admin@football.com",
+		EmailVerified: true,
+		PasswordHash:  "mock_hash",
+		Nickname:      "测试队长",
+		Avatar:        "https://google.com/avatar.png",
 	}
 	db.Create(&captain)
 
