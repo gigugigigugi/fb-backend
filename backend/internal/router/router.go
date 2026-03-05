@@ -103,6 +103,12 @@ func SetupRouter(r *gin.Engine, matchSvc *service.MatchService, teamSvc *service
 		bookings.POST("/:id/cancel", bookingHandler.CancelBooking)
 	}
 
+	// --- 用户相关流水/记录查询 ---
+	users := api.Group("/users")
+	{
+		users.GET("/me/bookings", bookingHandler.GetUserBookings)
+	}
+
 	// --- 球队模块路由 (Day 4) ---
 	teams := api.Group("/teams")
 	{

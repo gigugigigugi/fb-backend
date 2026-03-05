@@ -42,7 +42,7 @@ func main() {
 	bookingRepo := postgres.NewBookingRepository(db)
 
 	// 初始化业务服务 (单例模式, 依赖精准注入)
-	matchSvc := service.NewMatchService(matchRepo, bookingRepo, teamRepo)
+	matchSvc := service.NewMatchService(matchRepo, bookingRepo, teamRepo, userRepo)
 	teamSvc := service.NewTeamService(teamRepo)
 	authSvc := service.NewAuthService(userRepo)
 	// 2. 基于加载的配置设置 Gin 框架的运行模式

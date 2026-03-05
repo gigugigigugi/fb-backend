@@ -34,3 +34,18 @@ func (h *BookingHandler) CancelBooking(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "Booking canceled successfully", "data": nil})
 }
+
+func (h *BookingHandler) GetUserBookings(c *gin.Context) {
+	userID, ok := utils.GetUserID(c)
+	if !ok {
+		return
+	}
+
+	bookings, err := h.matchSvc.GetUserBookings(c.Request.Context(), userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "Failed to get bookings", "data": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success", "data": bookings})
+}

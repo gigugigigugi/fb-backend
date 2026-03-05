@@ -23,7 +23,7 @@ func (r *teamRepository) CreateTeam(ctx context.Context, team *model.Team) error
 
 func (r *teamRepository) GetTeamByID(ctx context.Context, teamID uint) (*model.Team, error) {
 	var team model.Team
-	if err := r.db.WithContext(ctx).First(&team, teamID).Error; err != nil {
+	if err := r.db.WithContext(ctx).Preload("Captain").Preload("Members").First(&team, teamID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, errors.New("team not found")
 		}

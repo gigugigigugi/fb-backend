@@ -46,6 +46,18 @@ func (r *bookingRepository) CountConfirmedPlayers(ctx context.Context, matchID u
 	return currentPlayers, err
 }
 
+func (r *bookingRepository) GetUserBookings(ctx context.Context, userID uint) ([]*model.Booking, error) {
+	var bookings []*model.Booking
+	err := r.db.WithContext(ctx).
+		Preload("Match").
+		Preload("Match.Team").
+		Preload("Match.Venue").
+		Where("user_id = ?", userID).
+		Order("created_at DESC").
+		Find(&bookings).Error
+	return bookings, err
+}
+
 func (r *bookingRepository) GetBookingWithLock(ctx context.Context, bookingID uint) (*model.Booking, error) {
 	var booking model.Booking
 	if err := r.db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Preload("Match").First(&booking, bookingID).Error; err != nil {

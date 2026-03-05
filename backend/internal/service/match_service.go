@@ -12,14 +12,16 @@ type MatchService struct {
 	matchRepo   repository.MatchRepository
 	bookingRepo repository.BookingRepository
 	teamRepo    repository.TeamRepository
+	userRepo    repository.UserRepository
 }
 
 // NewMatchService constructor 依赖多领域注入
-func NewMatchService(mRepo repository.MatchRepository, bRepo repository.BookingRepository, tRepo repository.TeamRepository) *MatchService {
+func NewMatchService(mRepo repository.MatchRepository, bRepo repository.BookingRepository, tRepo repository.TeamRepository, uRepo repository.UserRepository) *MatchService {
 	return &MatchService{
 		matchRepo:   mRepo,
 		bookingRepo: bRepo,
 		teamRepo:    tRepo,
+		userRepo:    uRepo,
 	}
 }
 
@@ -42,6 +44,15 @@ func (s *MatchService) JoinMatch(ctx context.Context, matchID uint, userID uint)
 		}
 		if match.Status != "RECRUITING" {
 			return errors.New("match is not open for recruiting")
+		}
+
+		// [B路线：信誉分熔断] 获取当前用户，判断他是不是被拉黑禁赛的玩家
+		user, err := s.userRepo.GetUserByID(ctx, userID)
+		if err != nil {
+			return err
+		}
+		if user.Reputation < 60 {
+			return errors.New("your reputation score is too low (< 60), booking blocked")
 		}
 
 		// 2. 幂等性检查
@@ -76,6 +87,11 @@ func (s *MatchService) JoinMatch(ctx context.Context, matchID uint, userID uint)
 // CancelBooking 取消报名并触发联动(扣分/替补转正)
 func (s *MatchService) CancelBooking(ctx context.Context, bookingID uint, userID uint) error {
 	return s.bookingRepo.CancelBookingTransaction(ctx, bookingID, userID)
+}
+
+// GetUserBookings 查询指定用户的全部行程
+func (s *MatchService) GetUserBookings(ctx context.Context, userID uint) ([]*model.Booking, error) {
+	return s.bookingRepo.GetUserBookings(ctx, userID)
 }
 
 // MatchCommonInfo 用于批量创建比赛的基础信息

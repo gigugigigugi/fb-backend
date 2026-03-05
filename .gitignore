@@ -22,3 +22,4 @@ Thumbs.db
 # IDE-specific
 .idea/
 .vscode/
+backend/docs/*
