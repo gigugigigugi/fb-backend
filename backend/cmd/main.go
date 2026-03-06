@@ -20,8 +20,9 @@ import (
 	"github.com/go-playground/validator/v10"
 )
 
+// main 是服务启动入口，负责依赖装配与 HTTP Server 启动。
 func main() {
-	// 初始化时区设置，确保整个应用基于日本时间或者强制 UTC
+	// 统一时区，避免时间比较与入库出现偏差。
 	loc, err := time.LoadLocation("Asia/Tokyo")
 	if err != nil {
 		slog.Error("Failed to load timezone", slog.String("error", err.Error()))
@@ -29,58 +30,50 @@ func main() {
 	}
 	time.Local = loc
 
-	// 在程序启动时，首先显式加载所有配置
 	config.Load()
-	// 1. 基于加载的配置初始化日志
 	logger.Init(config.App.Env)
-	// 初始化数据库连接
 	db := database.Init(config.App.DB.DSN)
 
-	// 初始化领域层仓储 (Domain Repositories 具体实现)
+	// 初始化数据仓储。
 	userRepo := postgres.NewUserRepository(db)
 	teamRepo := postgres.NewTeamRepository(db)
 	matchRepo := postgres.NewMatchRepository(db)
 	bookingRepo := postgres.NewBookingRepository(db)
+	verificationRepo := postgres.NewVerificationRepository(db)
 
-	// 初始化异步通知分发器（用于候补提醒）
+	// 初始化通知分发器（用于候补提醒）。
 	notifyDispatcher := notification.NewDispatcher(256)
 	notifyDispatcher.RegisterNotifier(notification.NewEmailNotifier())
 	notifyDispatcher.RegisterNotifier(notification.NewSMSNotifier())
 
-	// 初始化业务服务 (单例模式, 依赖精准注入)
+	// 初始化业务服务。
 	matchSvc := service.NewMatchService(matchRepo, bookingRepo, teamRepo, userRepo, notifyDispatcher)
 	teamSvc := service.NewTeamService(teamRepo)
-	authSvc := service.NewAuthService(userRepo)
-	// 2. 基于加载的配置设置 Gin 框架的运行模式
+	authSvc := service.NewAuthService(userRepo, verificationRepo)
+	userSvc := service.NewUserService(userRepo)
+
 	if config.App.Env == "prod" {
 		gin.SetMode(gin.ReleaseMode)
 	} else {
 		gin.SetMode(gin.DebugMode)
 	}
 
-	// 注册 Validator
+	// 预留自定义校验器注册位置。
 	if v, ok := binding.Validator.Engine().(*validator.Validate); ok {
-		// 这里未来可以注册自定义的 tag 校验器比如: v.RegisterValidation("xxx", xxxFunc)
 		_ = v
 	}
 
-	// 创建 Gin 引擎
 	r := gin.New()
-
-	// 注册中间件
 	r.Use(middleware.RequestLogger())
 	r.Use(gin.Recovery())
 
-	// 设置路由
-	router.SetupRouter(r, matchSvc, teamSvc, authSvc)
+	router.SetupRouter(r, matchSvc, teamSvc, authSvc, userSvc)
 
-	// 3. 从加载的配置中获取端口号
 	slog.Debug("Server starting",
 		slog.String("port", config.App.Port),
 		slog.String("env", config.App.Env),
 	)
 
-	// 启动服务
 	addr := fmt.Sprintf(":%s", config.App.Port)
 	if err := http.ListenAndServe(addr, r); err != nil {
 		slog.Error("Failed to start server", slog.String("error", err.Error()))

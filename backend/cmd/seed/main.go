@@ -21,7 +21,7 @@ func main() {
 	// 所以我们在这里采用暴力重置：直接 DROP TABLE 然后再建。
 	// [注意] 仅限于 cmd/seed (开发测试阶段) 这么玩！
 	log.Println("Dropping old tables to avoid migration conflicts...")
-	db.Migrator().DropTable(&model.Match{}, &model.TeamMember{}, &model.Team{}, &model.User{}, &model.Booking{}, &model.Venue{}, &model.Comment{})
+	db.Migrator().DropTable(&model.Match{}, &model.TeamMember{}, &model.Team{}, &model.User{}, &model.Booking{}, &model.Venue{}, &model.Comment{}, &model.VerificationChallenge{})
 
 	// 3. 自动迁移所有的模型
 	log.Println("Starting Auto Migration...")
@@ -33,6 +33,7 @@ func main() {
 		&model.Booking{},
 		&model.Venue{},
 		&model.Comment{},
+		&model.VerificationChallenge{},
 	)
 	if err != nil {
 		log.Fatalf("Failed to migrate database: %v", err)

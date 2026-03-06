@@ -11,6 +11,7 @@ import (
 	"time"
 )
 
+// MatchService 负责比赛报名、取消、批量建赛与详情聚合。
 type MatchService struct {
 	matchRepo   repository.MatchRepository
 	bookingRepo repository.BookingRepository
@@ -19,9 +20,43 @@ type MatchService struct {
 	notifier    *notification.Dispatcher
 }
 
-const maxWaitlistSize = 10
+const maxWaitlistSize = 10 // 候补队列容量上限。
 
-// NewMatchService constructor 依赖多领域注入
+// MatchDetailRosterItem 表示详情页中的单条报名成员信息。
+type MatchDetailRosterItem struct {
+	BookingID uint   `json:"booking_id"` // 报名记录 ID。
+	UserID    uint   `json:"user_id"`    // 用户 ID。
+	Nickname  string `json:"nickname"`   // 用户昵称。
+	Avatar    string `json:"avatar"`     // 用户头像。
+	GuestName string `json:"guest_name"` // 来宾名称（代报名场景）。
+	Status    string `json:"status"`     // 报名状态。
+}
+
+// MatchDetailCommentItem 表示详情页中的单条评论。
+type MatchDetailCommentItem struct {
+	ID        uint      `json:"id"`         // 评论 ID。
+	UserID    uint      `json:"user_id"`    // 评论作者 ID。
+	Nickname  string    `json:"nickname"`   // 评论作者昵称。
+	Avatar    string    `json:"avatar"`     // 评论作者头像。
+	Content   string    `json:"content"`    // 评论内容。
+	CreatedAt time.Time `json:"created_at"` // 评论创建时间。
+}
+
+// MatchDetailRoster 表示详情页的报名阵容分组。
+type MatchDetailRoster struct {
+	Confirmed []MatchDetailRosterItem `json:"confirmed"` // 已确认名单。
+	Waiting   []MatchDetailRosterItem `json:"waiting"`   // 候补名单。
+}
+
+// MatchDetailResponse 是比赛详情接口统一返回结构。
+type MatchDetailResponse struct {
+	MatchInfo  *model.Match             `json:"match_info"`  // 比赛基础信息。
+	Roster     MatchDetailRoster        `json:"roster"`      // 报名阵容。
+	Comments   []MatchDetailCommentItem `json:"comments"`    // 最新评论列表。
+	UserStatus string                   `json:"user_status"` // 当前用户状态：NOT_JOINED/JOINED/WAITING/CANCELED。
+}
+
+// NewMatchService 创建比赛服务实例。
 func NewMatchService(mRepo repository.MatchRepository, bRepo repository.BookingRepository, tRepo repository.TeamRepository, uRepo repository.UserRepository, notifier *notification.Dispatcher) *MatchService {
 	return &MatchService{
 		matchRepo:   mRepo,
@@ -32,19 +67,10 @@ func NewMatchService(mRepo repository.MatchRepository, bRepo repository.BookingR
 	}
 }
 
-// JoinMatch 处理报名逻辑
-// 业务流程（图纸）放置在 Service，调用 Repo（工具库）的基础方法
+// JoinMatch 处理用户报名逻辑。
 func (s *MatchService) JoinMatch(ctx context.Context, matchID uint, userID uint) error {
-	// 因为 JoinMatch 横跨比赛(Match)和预定(Booking)两张表
-	// 按照微服务限界上下文，最完美的做法是由一个 Saga 或全局 TxManager 来做，但在单体应用里，
-	// 我们通常委托涉及最多写的那个 Repo (BookingRepo) 来开启 Transaction
+	// 报名流程需要同时读写比赛与报名记录，因此在事务里执行关键步骤。
 	return s.bookingRepo.Transaction(ctx, func(txRepo repository.BookingRepository) error {
-		// 1. 锁定比赛记录 (这一步我们需要用到 matchRepo, 但需要带上事务上下文)
-		// 严谨的做法：传递底层 txDB 生成一个新的 txMatchRepo，这里直接用 txRepo 转成底层对象
-		// 为了不破坏封装，我们在真实工程里会有一个 unit of work 机制。
-
-		// 偷懒做法：我们直接在 Booking 库里包一个原有的 GetMatchWithLock 方法，或者
-		// 依赖倒置：这里暂时由于没写 uow，我们在查询时用主库 matchRepo (不参与写入事务的冲突)
 		match, err := s.matchRepo.GetMatchWithLock(ctx, matchID)
 		if err != nil {
 			return err
@@ -53,7 +79,7 @@ func (s *MatchService) JoinMatch(ctx context.Context, matchID uint, userID uint)
 			return errors.New("match is not open for recruiting")
 		}
 
-		// [B路线：信誉分熔断] 获取当前用户，判断他是不是被拉黑禁赛的玩家
+		// 信誉分低于阈值时禁止报名。
 		user, err := s.userRepo.GetUserByID(ctx, userID)
 		if err != nil {
 			return err
@@ -62,7 +88,7 @@ func (s *MatchService) JoinMatch(ctx context.Context, matchID uint, userID uint)
 			return errors.New("your reputation score is too low (< 60), booking blocked")
 		}
 
-		// 2. 幂等性检查
+		// 幂等校验：同一用户不可重复报名同一比赛。
 		hasBooked, err := txRepo.HasUserBooked(ctx, matchID, userID)
 		if err != nil {
 			return err
@@ -71,13 +97,11 @@ func (s *MatchService) JoinMatch(ctx context.Context, matchID uint, userID uint)
 			return errors.New("user already joined this match")
 		}
 
-		// 3. 检查容量
 		playersCount, err := txRepo.CountConfirmedPlayers(ctx, matchID)
 		if err != nil {
 			return err
 		}
 
-		// 4. 创建记录
 		booking := model.Booking{
 			MatchID:       matchID,
 			UserID:        userID,
@@ -85,7 +109,7 @@ func (s *MatchService) JoinMatch(ctx context.Context, matchID uint, userID uint)
 			PaymentStatus: "UNPAID",
 		}
 
-		// 如果比赛已经满员，将报名状态设置为等待
+		// 满员后进入 WAITING 队列，并限制候补最多 10 人。
 		if int(playersCount) >= match.MaxPlayers {
 			waitingCount, err := txRepo.CountWaitingPlayers(ctx, matchID)
 			if err != nil {
@@ -101,15 +125,18 @@ func (s *MatchService) JoinMatch(ctx context.Context, matchID uint, userID uint)
 	})
 }
 
-// CancelBooking 取消报名并触发联动(扣分/候补通知)
+// CancelBooking 取消报名，并通知候补队列用户（不执行自动转正）。
 func (s *MatchService) CancelBooking(ctx context.Context, bookingID uint, userID uint) error {
-	// 事务内只改状态与查询候补名单；通知属于事务外异步副作用。
+	// 事务内仅负责状态变更与候补名单提取；通知作为事务外副作用执行。
 	matchID, waitingUserIDs, err := s.bookingRepo.CancelBookingTransaction(ctx, bookingID, userID)
 	if err != nil {
 		return err
 	}
+	// 防御性限制：即使仓储层返回超量数据，通知层最多处理前 10 位候补用户。
+	if len(waitingUserIDs) > maxWaitlistSize {
+		waitingUserIDs = waitingUserIDs[:maxWaitlistSize]
+	}
 
-	// 没有候补或未注入通知器时直接返回，保持主流程成功。
 	if s.notifier == nil || len(waitingUserIDs) == 0 {
 		return nil
 	}
@@ -131,10 +158,9 @@ func (s *MatchService) CancelBooking(ctx context.Context, bookingID uint, userID
 		}
 
 		channels := make([]notification.Channel, 0, 2)
-		recipient := notification.Recipient{
-			UserID: user.ID,
-		}
+		recipient := notification.Recipient{UserID: user.ID}
 
+		// 仅使用已验证联系方式，防止误发。
 		if user.EmailVerified && user.Email != "" {
 			channels = append(channels, notification.ChannelEmail)
 			recipient.Email = user.Email
@@ -158,8 +184,8 @@ func (s *MatchService) CancelBooking(ctx context.Context, bookingID uint, userID
 			Channels:  channels,
 		}
 
+		// 通知失败不回滚主业务，只记录日志便于后续追踪。
 		if enqueueErr := s.notifier.Enqueue(task); enqueueErr != nil {
-			// 通知入队失败不回滚取消报名主流程，仅记录错误供后续补偿。
 			slog.Error("Failed to enqueue waitlist notification",
 				slog.Uint64("match_id", uint64(matchID)),
 				slog.Uint64("user_id", uint64(waitingUserID)),
@@ -171,32 +197,32 @@ func (s *MatchService) CancelBooking(ctx context.Context, bookingID uint, userID
 	return nil
 }
 
-// GetUserBookings 查询指定用户的全部行程
+// GetUserBookings 查询当前用户的报名记录。
 func (s *MatchService) GetUserBookings(ctx context.Context, userID uint) ([]*model.Booking, error) {
 	return s.bookingRepo.GetUserBookings(ctx, userID)
 }
 
-// MatchCommonInfo 用于批量创建比赛的基础信息
+// MatchCommonInfo 表示批量建赛时共享的固定字段。
 type MatchCommonInfo struct {
-	Price      float64
-	MaxPlayers int
-	Format     int
-	Note       string
+	Price      float64 // 单人费用。
+	MaxPlayers int     // 最大人数。
+	Format     int     // 赛制。
+	Note       string  // 备注。
 }
 
-// MatchSchedule 比赛的时间安排表
+// MatchSchedule 表示一场比赛的时间安排。
 type MatchSchedule struct {
-	StartTime time.Time
-	EndTime   time.Time
+	StartTime time.Time // 开始时间。
+	EndTime   time.Time // 结束时间。
 }
 
-// CreateMatchBatch 开启事务批量创建比赛
+// CreateMatchBatch 批量创建比赛。
 func (s *MatchService) CreateMatchBatch(ctx context.Context, userID uint, teamID uint, venueID uint, info MatchCommonInfo, schedules []MatchSchedule) ([]model.Match, error) {
 	if len(schedules) == 0 {
 		return nil, errors.New("schedules cannot be empty")
 	}
 
-	// [B路线：越权防范] 检查是否有权限以该球队名义发局
+	// 仅队长/管理员允许以球队名义建赛。
 	isAdmin, err := s.teamRepo.IsTeamAdmin(ctx, teamID, userID)
 	if err != nil {
 		return nil, err
@@ -225,16 +251,14 @@ func (s *MatchService) CreateMatchBatch(ctx context.Context, userID uint, teamID
 				Status:     "RECRUITING",
 			}
 
-			var createErr error
-			if createErr = txRepo.CreateMatch(ctx, &newMatch); createErr != nil {
-				return createErr // Any failure will automatically rollback the entire transaction
+			if createErr := txRepo.CreateMatch(ctx, &newMatch); createErr != nil {
+				return createErr
 			}
 
 			createdMatches = append(createdMatches, newMatch)
 		}
 		return nil
 	})
-
 	if err != nil {
 		return nil, err
 	}
@@ -242,19 +266,98 @@ func (s *MatchService) CreateMatchBatch(ctx context.Context, userID uint, teamID
 	return createdMatches, nil
 }
 
-// SearchMatches 暴露给 router 的查询接口，负责基本的过滤约束与向下透传
+// SearchMatches 按过滤条件分页查询比赛列表。
 func (s *MatchService) SearchMatches(ctx context.Context, filter repository.MatchFilter, page, limit int) ([]*model.Match, int64, error) {
-	// 简单的安全截断，防止恶意请求拉爆数据库
+	// 分页参数做保护，避免异常请求导致大批量扫描。
 	if limit <= 0 {
 		limit = 10
 	} else if limit > 50 {
-		limit = 50 // 最大强制限制单页50条
+		limit = 50
 	}
-
 	if page <= 0 {
 		page = 1
 	}
 
 	offset := (page - 1) * limit
 	return s.matchRepo.GetMatches(ctx, filter, offset, limit)
+}
+
+// GetMatchDetails 聚合比赛详情（基础信息、阵容、评论和当前用户状态）。
+func (s *MatchService) GetMatchDetails(ctx context.Context, matchID uint, userID uint) (*MatchDetailResponse, error) {
+	match, err := s.matchRepo.GetMatchByID(ctx, matchID)
+	if err != nil {
+		return nil, err
+	}
+
+	bookings, err := s.bookingRepo.GetBookingsByMatchID(ctx, matchID)
+	if err != nil {
+		return nil, err
+	}
+
+	comments, err := s.matchRepo.GetCommentsByMatchID(ctx, matchID, 50)
+	if err != nil {
+		return nil, err
+	}
+
+	resp := &MatchDetailResponse{
+		MatchInfo: match,
+		Roster: MatchDetailRoster{
+			Confirmed: make([]MatchDetailRosterItem, 0),
+			Waiting:   make([]MatchDetailRosterItem, 0),
+		},
+		Comments:   make([]MatchDetailCommentItem, 0),
+		UserStatus: "NOT_JOINED",
+	}
+
+	for _, b := range bookings {
+		item := MatchDetailRosterItem{
+			BookingID: b.ID,
+			UserID:    b.UserID,
+			GuestName: b.GuestName,
+			Status:    b.Status,
+		}
+		if b.User != nil {
+			item.Nickname = b.User.Nickname
+			item.Avatar = b.User.Avatar
+		}
+
+		switch b.Status {
+		case "CONFIRMED":
+			resp.Roster.Confirmed = append(resp.Roster.Confirmed, item)
+		case "WAITING":
+			resp.Roster.Waiting = append(resp.Roster.Waiting, item)
+		}
+
+		// 根据当前用户在报名列表中的状态推导 user_status。
+		if b.UserID == userID {
+			switch b.Status {
+			case "CONFIRMED":
+				resp.UserStatus = "JOINED"
+			case "WAITING":
+				if resp.UserStatus != "JOINED" {
+					resp.UserStatus = "WAITING"
+				}
+			case "CANCELED":
+				if resp.UserStatus == "NOT_JOINED" {
+					resp.UserStatus = "CANCELED"
+				}
+			}
+		}
+	}
+
+	for _, c := range comments {
+		item := MatchDetailCommentItem{
+			ID:        c.ID,
+			UserID:    c.UserID,
+			Content:   c.Content,
+			CreatedAt: c.CreatedAt,
+		}
+		if c.User != nil {
+			item.Nickname = c.User.Nickname
+			item.Avatar = c.User.Avatar
+		}
+		resp.Comments = append(resp.Comments, item)
+	}
+
+	return resp, nil
 }

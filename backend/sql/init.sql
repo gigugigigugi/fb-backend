@@ -1,6 +1,6 @@
 -- =============================================
 -- Football App Database Initialization Script
--- Version: 1.7
+-- Version: 1.8
 -- Database: PostgreSQL
 -- =============================================
 
@@ -144,6 +144,23 @@ CREATE TABLE IF NOT EXISTS comments (
 
 CREATE INDEX IF NOT EXISTS idx_comments_match_id ON comments(match_id);
 CREATE INDEX IF NOT EXISTS idx_comments_deleted_at ON comments(deleted_at);
+
+-- 8. VerificationChallenges (验证码状态表)
+CREATE TABLE IF NOT EXISTS verification_challenges (
+    id SERIAL PRIMARY KEY,
+    biz_key VARCHAR(200) UNIQUE NOT NULL,
+    code VARCHAR(6) NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    send_count INT DEFAULT 0,
+    window_start TIMESTAMPTZ NOT NULL,
+    last_sent_at TIMESTAMPTZ,
+    fail_count INT DEFAULT 0,
+    lock_until TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_verification_challenges_biz_key ON verification_challenges(biz_key);
 
 -- =============================================
 -- End of Initialization Script

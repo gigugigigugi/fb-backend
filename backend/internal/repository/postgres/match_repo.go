@@ -14,10 +14,12 @@ type matchRepository struct {
 	db *gorm.DB
 }
 
+// NewMatchRepository 创建 MatchRepository 的 PostgreSQL 实现。
 func NewMatchRepository(db *gorm.DB) repository.MatchRepository {
 	return &matchRepository{db: db}
 }
 
+// Transaction 在事务中执行比赛仓储操作。
 func (r *matchRepository) Transaction(ctx context.Context, fn func(txRepo repository.MatchRepository) error) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		txRepo := NewMatchRepository(tx)
@@ -25,10 +27,12 @@ func (r *matchRepository) Transaction(ctx context.Context, fn func(txRepo reposi
 	})
 }
 
+// CreateMatch 创建比赛。
 func (r *matchRepository) CreateMatch(ctx context.Context, match *model.Match) error {
 	return r.db.WithContext(ctx).Create(match).Error
 }
 
+// GetMatchWithLock 按 ID 查询比赛并加行级锁（FOR UPDATE）。
 func (r *matchRepository) GetMatchWithLock(ctx context.Context, matchID uint) (*model.Match, error) {
 	var match model.Match
 	if err := r.db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).First(&match, matchID).Error; err != nil {
@@ -40,6 +44,38 @@ func (r *matchRepository) GetMatchWithLock(ctx context.Context, matchID uint) (*
 	return &match, nil
 }
 
+// GetMatchByID 查询比赛详情基础信息（含 Team、Venue）。
+func (r *matchRepository) GetMatchByID(ctx context.Context, matchID uint) (*model.Match, error) {
+	var match model.Match
+	if err := r.db.WithContext(ctx).
+		Preload("Team").
+		Preload("Venue").
+		First(&match, matchID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errors.New("match not found")
+		}
+		return nil, err
+	}
+	return &match, nil
+}
+
+// GetCommentsByMatchID 查询比赛评论列表（按时间倒序，默认最多 50 条）。
+func (r *matchRepository) GetCommentsByMatchID(ctx context.Context, matchID uint, limit int) ([]*model.Comment, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+
+	var comments []*model.Comment
+	err := r.db.WithContext(ctx).
+		Preload("User").
+		Where("match_id = ?", matchID).
+		Order("created_at DESC").
+		Limit(limit).
+		Find(&comments).Error
+	return comments, err
+}
+
+// GetMatches 按过滤条件分页查询比赛列表并返回总数。
 func (r *matchRepository) GetMatches(ctx context.Context, filter repository.MatchFilter, offset, limit int) ([]*model.Match, int64, error) {
 	var matches []*model.Match
 	var totalCount int64
@@ -63,7 +99,6 @@ func (r *matchRepository) GetMatches(ctx context.Context, filter repository.Matc
 	if err := query.Count(&totalCount).Error; err != nil {
 		return nil, 0, err
 	}
-
 	if totalCount == 0 {
 		return []*model.Match{}, 0, nil
 	}
@@ -75,7 +110,6 @@ func (r *matchRepository) GetMatches(ctx context.Context, filter repository.Matc
 		Offset(offset).
 		Limit(limit).
 		Find(&matches).Error
-
 	if err != nil {
 		return nil, 0, err
 	}
