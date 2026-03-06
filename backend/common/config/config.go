@@ -8,31 +8,55 @@ import (
 	"github.com/joho/godotenv"
 )
 
-// AppConfig 全局配置结构体
+// AppConfig 是全局配置结构体。
 type AppConfig struct {
-	Env        string // debug, release, test
-	Port       string // 8080
-	AuthBypass bool   // 是否绕过登录验证 (仅开发期使用)
+	Env        string // debug / release / test
+	Port       string // 监听端口
+	AuthBypass bool   // 是否绕过鉴权（仅开发期）
 
-	DB  DBConfig
-	JWT JWTConfig
+	DB           DBConfig
+	JWT          JWTConfig
+	Verification VerificationConfig
 }
 
+// DBConfig 是数据库配置。
 type DBConfig struct {
-	DSN string // 数据库连接字符串
+	DSN string // PostgreSQL DSN
 }
 
+// JWTConfig 是 JWT 配置。
 type JWTConfig struct {
-	Secret string // 签名密钥
-	Exp    int    // 过期时间(小时)
+	Secret string // JWT 签名密钥
+	Exp    int    // 过期小时数
 }
 
-// App 全局配置实例，其他包直接用 config.App.DB.DSN 访问
+// VerificationConfig 是验证码发送配置。
+type VerificationConfig struct {
+	Provider       string // mock / real
+	HTTPTimeoutSec int
+	Email          VerificationEmailConfig
+	SMS            VerificationSMSConfig
+}
+
+// VerificationEmailConfig 是邮箱发送配置。
+type VerificationEmailConfig struct {
+	APIURL string
+	APIKey string
+	From   string
+}
+
+// VerificationSMSConfig 是短信发送配置。
+type VerificationSMSConfig struct {
+	APIURL string
+	APIKey string
+	Sender string
+}
+
+// App 是全局配置实例。
 var App *AppConfig
 
-// Load 初始化配置
+// Load 从环境变量加载配置。
 func Load() {
-	// 1. 尝试加载 .env 文件，并处理错误
 	env := getEnv("GIN_MODE", "debug")
 	if err := godotenv.Load(); err != nil && env == "debug" {
 		log.Println("Warning: .env file not found, using system environment variables")
@@ -49,15 +73,27 @@ func Load() {
 			Secret: getEnv("JWT_SECRET", "default-secret-do-not-use-in-prod"),
 			Exp:    getEnvInt("JWT_EXP_HOURS", 72),
 		},
+		Verification: VerificationConfig{
+			Provider:       getEnv("VERIFICATION_PROVIDER", "mock"),
+			HTTPTimeoutSec: getEnvInt("VERIFICATION_HTTP_TIMEOUT_SEC", 8),
+			Email: VerificationEmailConfig{
+				APIURL: getEnv("VERIFICATION_EMAIL_API_URL", ""),
+				APIKey: getEnv("VERIFICATION_EMAIL_API_KEY", ""),
+				From:   getEnv("VERIFICATION_EMAIL_FROM", ""),
+			},
+			SMS: VerificationSMSConfig{
+				APIURL: getEnv("VERIFICATION_SMS_API_URL", ""),
+				APIKey: getEnv("VERIFICATION_SMS_API_KEY", ""),
+				Sender: getEnv("VERIFICATION_SMS_SENDER", ""),
+			},
+		},
 	}
 
-	// 2. 关键配置检查
 	if App.DB.DSN == "" && App.Env != "test" {
 		log.Println("Warning: DB_DSN is empty")
 	}
 }
 
-// getEnv 获取环境变量，如果为空则返回默认值
 func getEnv(key, fallback string) string {
 	if value, exists := os.LookupEnv(key); exists {
 		return value
@@ -65,7 +101,6 @@ func getEnv(key, fallback string) string {
 	return fallback
 }
 
-// getEnvInt 获取整数环境变量
 func getEnvInt(key string, fallback int) int {
 	strValue := getEnv(key, "")
 	if value, err := strconv.Atoi(strValue); err == nil {
@@ -74,7 +109,6 @@ func getEnvInt(key string, fallback int) int {
 	return fallback
 }
 
-// getEnvBool 获取布尔环境变量
 func getEnvBool(key string, fallback bool) bool {
 	strValue := getEnv(key, "")
 	if value, err := strconv.ParseBool(strValue); err == nil {

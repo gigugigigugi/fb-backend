@@ -6,6 +6,7 @@ import (
 	"football-backend/common/database"
 	"football-backend/common/logger"
 	"football-backend/common/notification"
+	verificationcode "football-backend/common/verification"
 	"football-backend/internal/middleware"
 	"football-backend/internal/repository/postgres"
 	"football-backend/internal/router"
@@ -22,7 +23,6 @@ import (
 
 // main 是服务启动入口，负责依赖装配与 HTTP Server 启动。
 func main() {
-	// 统一时区，避免时间比较与入库出现偏差。
 	loc, err := time.LoadLocation("Asia/Tokyo")
 	if err != nil {
 		slog.Error("Failed to load timezone", slog.String("error", err.Error()))
@@ -34,22 +34,26 @@ func main() {
 	logger.Init(config.App.Env)
 	db := database.Init(config.App.DB.DSN)
 
-	// 初始化数据仓储。
 	userRepo := postgres.NewUserRepository(db)
 	teamRepo := postgres.NewTeamRepository(db)
 	matchRepo := postgres.NewMatchRepository(db)
 	bookingRepo := postgres.NewBookingRepository(db)
 	verificationRepo := postgres.NewVerificationRepository(db)
 
-	// 初始化通知分发器（用于候补提醒）。
 	notifyDispatcher := notification.NewDispatcher(256)
 	notifyDispatcher.RegisterNotifier(notification.NewEmailNotifier())
 	notifyDispatcher.RegisterNotifier(notification.NewSMSNotifier())
 
-	// 初始化业务服务。
+	codeProvider, err := verificationcode.NewCodeProviderFromConfig(config.App.Verification)
+	if err != nil {
+		slog.Error("Failed to init verification code provider", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	slog.Info("Verification provider initialized", slog.String("mode", codeProvider.Mode()))
+
 	matchSvc := service.NewMatchService(matchRepo, bookingRepo, teamRepo, userRepo, notifyDispatcher)
 	teamSvc := service.NewTeamService(teamRepo)
-	authSvc := service.NewAuthService(userRepo, verificationRepo)
+	authSvc := service.NewAuthService(userRepo, verificationRepo, codeProvider)
 	userSvc := service.NewUserService(userRepo)
 
 	if config.App.Env == "prod" {
@@ -58,7 +62,6 @@ func main() {
 		gin.SetMode(gin.DebugMode)
 	}
 
-	// 预留自定义校验器注册位置。
 	if v, ok := binding.Validator.Engine().(*validator.Validate); ok {
 		_ = v
 	}

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"football-backend/common/utils"
+	verificationcode "football-backend/common/verification"
 	"football-backend/internal/model"
 	"football-backend/internal/repository"
 	"log/slog"
@@ -16,28 +17,38 @@ import (
 )
 
 const (
-	verificationCodeTTL = 10 * time.Minute // 验证码有效期。
-	sendCooldown        = 60 * time.Second // 同一业务键两次发送的最小间隔。
-	maxSendPerHour      = 5                // 每小时发送上限。
-	maxVerifyFailures   = 5                // 连续失败达到该值后进入锁定。
-	verifyLockDuration  = 10 * time.Minute // 锁定时长。
+	verificationCodeTTL = 10 * time.Minute
+	sendCooldown        = 60 * time.Second
+	maxSendPerHour      = 5
+	maxVerifyFailures   = 5
+	verifyLockDuration  = 10 * time.Minute
 )
 
-// AuthService 负责注册登录与验证码验证相关业务。
+// AuthService 负责认证与验证码流程。
 type AuthService struct {
 	userRepo   repository.UserRepository
 	verifyRepo repository.VerificationRepository
+	codeSender verificationcode.CodeProvider
 }
 
-// NewAuthService 创建认证服务实例。
-func NewAuthService(userRepo repository.UserRepository, verifyRepo repository.VerificationRepository) *AuthService {
+// NewAuthService 创建认证服务。
+func NewAuthService(
+	userRepo repository.UserRepository,
+	verifyRepo repository.VerificationRepository,
+	codeSender verificationcode.CodeProvider,
+) *AuthService {
+	if codeSender == nil {
+		codeSender = verificationcode.NewMockCodeProvider()
+	}
+
 	return &AuthService{
 		userRepo:   userRepo,
 		verifyRepo: verifyRepo,
+		codeSender: codeSender,
 	}
 }
 
-// RegisterEmail 使用邮箱密码注册并返回 JWT。
+// RegisterEmail 通过邮箱注册并返回 JWT。
 func (s *AuthService) RegisterEmail(ctx context.Context, email, password, nickname string) (string, error) {
 	if existingUser, _ := s.userRepo.GetUserByEmail(ctx, email); existingUser != nil {
 		return "", errors.New("email already registered")
@@ -61,7 +72,7 @@ func (s *AuthService) RegisterEmail(ctx context.Context, email, password, nickna
 	return utils.GenerateToken(newUser.ID)
 }
 
-// LoginEmail 使用邮箱密码登录并返回 JWT。
+// LoginEmail 通过邮箱登录并返回 JWT。
 func (s *AuthService) LoginEmail(ctx context.Context, email, password string) (string, error) {
 	user, err := s.userRepo.GetUserByEmail(ctx, email)
 	if err != nil {
@@ -75,7 +86,7 @@ func (s *AuthService) LoginEmail(ctx context.Context, email, password string) (s
 	return utils.GenerateToken(user.ID)
 }
 
-// LoginGoogle 使用 Google 身份登录；若用户不存在则自动创建。
+// LoginGoogle 通过 Google 登录；不存在则自动创建用户。
 func (s *AuthService) LoginGoogle(ctx context.Context, googleID, email, name, avatar string) (string, error) {
 	user, _ := s.userRepo.GetUserByGoogleID(ctx, googleID)
 	if user == nil {
@@ -100,7 +111,7 @@ func (s *AuthService) LoginGoogle(ctx context.Context, googleID, email, name, av
 	return utils.GenerateToken(user.ID)
 }
 
-// SendEmailVerificationCode 发送邮箱验证码（仅生成并记录，实际发送由外部渠道处理）。
+// SendEmailVerificationCode 发送邮箱验证码。
 func (s *AuthService) SendEmailVerificationCode(ctx context.Context, userID uint) error {
 	user, err := s.userRepo.GetUserByID(ctx, userID)
 	if err != nil {
@@ -117,7 +128,6 @@ func (s *AuthService) SendEmailVerificationCode(ctx context.Context, userID uint
 		return err
 	}
 
-	// 统一执行发送频控与窗口计数推进。
 	if err := s.checkSendAllowedAndAdvance(state, now); err != nil {
 		return err
 	}
@@ -126,22 +136,30 @@ func (s *AuthService) SendEmailVerificationCode(ctx context.Context, userID uint
 	if err != nil {
 		return err
 	}
+
 	state.Code = code
 	state.ExpiresAt = now.Add(verificationCodeTTL)
-
 	if err := s.verifyRepo.Upsert(ctx, state); err != nil {
 		return err
 	}
 
-	slog.Info("Email verification code generated",
+	if err := s.codeSender.SendEmailCode(ctx, user.Email, code); err != nil {
+		slog.Error("Failed to send email verification code",
+			slog.Uint64("user_id", uint64(userID)),
+			slog.String("email", user.Email),
+			slog.String("error", err.Error()),
+		)
+		return errors.New("failed to send email verification code")
+	}
+
+	slog.Info("Email verification code sent",
 		slog.Uint64("user_id", uint64(userID)),
 		slog.String("email", user.Email),
-		slog.String("code", code),
 	)
 	return nil
 }
 
-// VerifyEmailCode 校验邮箱验证码并更新邮箱已验证状态。
+// VerifyEmailCode 校验邮箱验证码并更新用户状态。
 func (s *AuthService) VerifyEmailCode(ctx context.Context, userID uint, code string) error {
 	key := fmt.Sprintf("email:%d", userID)
 	now := time.Now()
@@ -180,12 +198,11 @@ func (s *AuthService) VerifyEmailCode(ctx context.Context, userID uint, code str
 		return err
 	}
 
-	// 校验成功后清空验证码和失败状态，避免重复使用。
 	s.clearVerifyState(state, now)
 	return s.verifyRepo.Upsert(ctx, state)
 }
 
-// SendPhoneVerificationCode 发送手机验证码（当前仅写入状态并打印日志）。
+// SendPhoneVerificationCode 发送短信验证码。
 func (s *AuthService) SendPhoneVerificationCode(ctx context.Context, userID uint, phone string) error {
 	normalized := utils.NormalizePhone(phone)
 	if !utils.IsValidE164(normalized) {
@@ -215,22 +232,30 @@ func (s *AuthService) SendPhoneVerificationCode(ctx context.Context, userID uint
 	if err != nil {
 		return err
 	}
+
 	state.Code = code
 	state.ExpiresAt = now.Add(verificationCodeTTL)
-
 	if err := s.verifyRepo.Upsert(ctx, state); err != nil {
 		return err
 	}
 
-	slog.Info("Phone verification code generated",
+	if err := s.codeSender.SendSMSCode(ctx, normalized, code); err != nil {
+		slog.Error("Failed to send phone verification code",
+			slog.Uint64("user_id", uint64(userID)),
+			slog.String("phone", normalized),
+			slog.String("error", err.Error()),
+		)
+		return errors.New("failed to send phone verification code")
+	}
+
+	slog.Info("Phone verification code sent",
 		slog.Uint64("user_id", uint64(userID)),
 		slog.String("phone", normalized),
-		slog.String("code", code),
 	)
 	return nil
 }
 
-// VerifyPhoneCode 校验手机验证码并写入手机号与已验证状态。
+// VerifyPhoneCode 校验短信验证码并更新用户状态。
 func (s *AuthService) VerifyPhoneCode(ctx context.Context, userID uint, phone string, code string) error {
 	normalized := utils.NormalizePhone(phone)
 	if !utils.IsValidE164(normalized) {
@@ -278,7 +303,6 @@ func (s *AuthService) VerifyPhoneCode(ctx context.Context, userID uint, phone st
 	return s.verifyRepo.Upsert(ctx, state)
 }
 
-// getOrInitVerificationState 读取验证码状态，不存在则初始化默认状态。
 func (s *AuthService) getOrInitVerificationState(ctx context.Context, key string, now time.Time) (*repository.VerificationState, error) {
 	state, err := s.verifyRepo.GetByKey(ctx, key)
 	if err == nil {
@@ -296,9 +320,7 @@ func (s *AuthService) getOrInitVerificationState(ctx context.Context, key string
 	}, nil
 }
 
-// checkSendAllowedAndAdvance 校验发送限制并推进发送计数。
 func (s *AuthService) checkSendAllowedAndAdvance(state *repository.VerificationState, now time.Time) error {
-	// 超过 1 小时则开启新统计窗口。
 	if now.Sub(state.WindowStart) >= time.Hour {
 		state.WindowStart = now
 		state.SendCount = 0
@@ -316,7 +338,6 @@ func (s *AuthService) checkSendAllowedAndAdvance(state *repository.VerificationS
 	return nil
 }
 
-// checkVerifyAllowed 校验当前是否处于失败锁定期。
 func checkVerifyAllowed(state *repository.VerificationState, now time.Time) error {
 	if state.LockUntil != nil && now.Before(*state.LockUntil) {
 		return errors.New("too many failed attempts, please try again later")
@@ -324,7 +345,6 @@ func checkVerifyAllowed(state *repository.VerificationState, now time.Time) erro
 	return nil
 }
 
-// markVerifyFailed 记录一次校验失败，并在达到阈值后写入锁定时间。
 func (s *AuthService) markVerifyFailed(ctx context.Context, state *repository.VerificationState, now time.Time) error {
 	state.FailCount++
 	if state.FailCount >= maxVerifyFailures {
@@ -335,7 +355,6 @@ func (s *AuthService) markVerifyFailed(ctx context.Context, state *repository.Ve
 	return s.verifyRepo.Upsert(ctx, state)
 }
 
-// clearVerifyState 清空验证码与失败状态（用于校验成功后）。
 func (s *AuthService) clearVerifyState(state *repository.VerificationState, now time.Time) {
 	state.Code = ""
 	state.ExpiresAt = now
@@ -343,12 +362,10 @@ func (s *AuthService) clearVerifyState(state *repository.VerificationState, now 
 	state.LockUntil = nil
 }
 
-// phoneCodeKey 生成手机号验证码状态的业务键。
 func phoneCodeKey(userID uint, phone string) string {
 	return fmt.Sprintf("phone:%d:%s", userID, phone)
 }
 
-// generate6DigitCode 生成 6 位数字验证码。
 func generate6DigitCode() (string, error) {
 	n, err := rand.Int(rand.Reader, big.NewInt(1000000))
 	if err != nil {
