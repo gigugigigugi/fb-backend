@@ -39,10 +39,23 @@
    - matches/:id/details 的 user_status 与聚合
    - CancelBooking 最多通知 10 人
 2. `handler` 层测试已补核心新 API（成功/失败、状态码、响应结构）。
-3. 当前 `go test ./...` 可通过。
+3. 集成测试已落地并可执行：
+   - WAITING 上限与取消后不自动转正
+   - venues regions/map
+   - settlement/subteams 权限边界
+4. 已新增 `cmd/schema-check`：
+   - 对比 `sql/init.sql` 与 `AutoMigrate` 产物的核心表字段集合
+   - 不一致时直接失败
+5. GitHub Actions 已接入三阶段：
+   - Unit Tests
+   - Integration Tests
+   - Schema Check
 
 ## 5. 待完成项（P2）
 
-1. 真实通知 provider 的联调与验收（real 模式）。
-2. 集成测试与发布脚本收敛。
+1. 真实通知 provider 的联调与验收（real 模式）：
+   - 已提供独立联调命令：`go run ./cmd/provider-smoke`
+   - 已提供 GitHub 手动联调工作流：`Provider Smoke`
+   - 待完成：使用供应商测试账号完成邮件/短信双通道实测并留痕
+2. 发布脚本收敛（部署前检查、回滚策略、环境一致性）。
 3. 前端落地与端到端联调。

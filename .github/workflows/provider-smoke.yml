@@ -1,0 +1,74 @@
+name: Provider Smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      channels:
+        description: "验证通道: email / sms / both"
+        required: true
+        default: "both"
+      code:
+        description: "验证码内容（可用于供应商日志检索）"
+        required: false
+        default: "654321"
+
+jobs:
+  smoke:
+    name: Real Provider Smoke
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: backend
+
+    env:
+      VERIFICATION_PROVIDER: real
+      VERIFICATION_HTTP_TIMEOUT_SEC: 8
+
+      VERIFICATION_EMAIL_API_URL: ${{ secrets.VERIFICATION_EMAIL_API_URL }}
+      VERIFICATION_EMAIL_API_KEY: ${{ secrets.VERIFICATION_EMAIL_API_KEY }}
+      VERIFICATION_EMAIL_FROM: ${{ secrets.VERIFICATION_EMAIL_FROM }}
+
+      VERIFICATION_SMS_API_URL: ${{ secrets.VERIFICATION_SMS_API_URL }}
+      VERIFICATION_SMS_API_KEY: ${{ secrets.VERIFICATION_SMS_API_KEY }}
+      VERIFICATION_SMS_SENDER: ${{ secrets.VERIFICATION_SMS_SENDER }}
+
+      PROVIDER_SMOKE_CHANNELS: ${{ github.event.inputs.channels }}
+      PROVIDER_SMOKE_CODE: ${{ github.event.inputs.code }}
+      PROVIDER_SMOKE_EMAIL_TO: ${{ secrets.PROVIDER_SMOKE_EMAIL_TO }}
+      PROVIDER_SMOKE_PHONE_TO: ${{ secrets.PROVIDER_SMOKE_PHONE_TO }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Validate Required Secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          required=(
+            VERIFICATION_EMAIL_API_URL
+            VERIFICATION_EMAIL_API_KEY
+            VERIFICATION_EMAIL_FROM
+            VERIFICATION_SMS_API_URL
+            VERIFICATION_SMS_API_KEY
+            VERIFICATION_SMS_SENDER
+            PROVIDER_SMOKE_EMAIL_TO
+            PROVIDER_SMOKE_PHONE_TO
+          )
+          for key in "${required[@]}"; do
+            if [ -z "${!key:-}" ]; then
+              echo "missing required secret/env: $key"
+              exit 1
+            fi
+          done
+
+      - name: Run Provider Smoke
+        run: go run ./cmd/provider-smoke
+

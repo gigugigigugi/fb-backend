@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"football-backend/common/utils"
 	"football-backend/internal/service"
 	"net/http"
@@ -101,6 +102,10 @@ func (h *AuthHandler) SendEmailVerificationCode(c *gin.Context) {
 	}
 
 	if err := h.authSvc.SendEmailVerificationCode(c.Request.Context(), userID); err != nil {
+		if errors.Is(err, service.ErrEmailVerificationDisabled) {
+			c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "Email verification is disabled by server config"})
+			return
+		}
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": err.Error()})
 		return
 	}
@@ -123,6 +128,10 @@ func (h *AuthHandler) VerifyEmailCode(c *gin.Context) {
 	}
 
 	if err := h.authSvc.VerifyEmailCode(c.Request.Context(), userID, req.Code); err != nil {
+		if errors.Is(err, service.ErrEmailVerificationDisabled) {
+			c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "Email verification is disabled by server config"})
+			return
+		}
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": err.Error()})
 		return
 	}
@@ -145,6 +154,10 @@ func (h *AuthHandler) SendPhoneVerificationCode(c *gin.Context) {
 	}
 
 	if err := h.authSvc.SendPhoneVerificationCode(c.Request.Context(), userID, req.Phone); err != nil {
+		if errors.Is(err, service.ErrPhoneVerificationDisabled) {
+			c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "Phone verification is disabled by server config"})
+			return
+		}
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": err.Error()})
 		return
 	}
@@ -168,6 +181,10 @@ func (h *AuthHandler) VerifyPhoneCode(c *gin.Context) {
 	}
 
 	if err := h.authSvc.VerifyPhoneCode(c.Request.Context(), userID, req.Phone, req.Code); err != nil {
+		if errors.Is(err, service.ErrPhoneVerificationDisabled) {
+			c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "Phone verification is disabled by server config"})
+			return
+		}
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": err.Error()})
 		return
 	}

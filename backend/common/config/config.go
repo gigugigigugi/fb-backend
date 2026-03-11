@@ -34,6 +34,8 @@ type JWTConfig struct {
 type VerificationConfig struct {
 	Provider       string // mock / real
 	HTTPTimeoutSec int
+	EmailEnabled   bool // 是否启用邮箱验证码发送与验证流程。
+	SMSEnabled     bool // 是否启用短信验证码发送与验证流程。
 	Email          VerificationEmailConfig
 	SMS            VerificationSMSConfig
 }
@@ -76,6 +78,9 @@ func Load() {
 		Verification: VerificationConfig{
 			Provider:       getEnv("VERIFICATION_PROVIDER", "mock"),
 			HTTPTimeoutSec: getEnvInt("VERIFICATION_HTTP_TIMEOUT_SEC", 8),
+			// 为了控制成本，默认关闭 email/sms 验证流程；需要时可在环境变量显式开启。
+			EmailEnabled: getEnvBool("VERIFICATION_EMAIL_ENABLED", false),
+			SMSEnabled:   getEnvBool("VERIFICATION_SMS_ENABLED", false),
 			Email: VerificationEmailConfig{
 				APIURL: getEnv("VERIFICATION_EMAIL_API_URL", ""),
 				APIKey: getEnv("VERIFICATION_EMAIL_API_KEY", ""),

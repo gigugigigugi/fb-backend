@@ -54,7 +54,15 @@ func main() {
 
 	matchSvc := service.NewMatchService(matchRepo, bookingRepo, teamRepo, userRepo, notifyDispatcher)
 	teamSvc := service.NewTeamService(teamRepo)
-	authSvc := service.NewAuthService(userRepo, verificationRepo, codeProvider)
+	authSvc := service.NewAuthService(
+		userRepo,
+		verificationRepo,
+		codeProvider,
+		service.AuthServiceOptions{
+			EmailVerificationEnabled: config.App.Verification.EmailEnabled,
+			PhoneVerificationEnabled: config.App.Verification.SMSEnabled,
+		},
+	)
 	userSvc := service.NewUserService(userRepo)
 	venueSvc := service.NewVenueService(venueRepo)
 

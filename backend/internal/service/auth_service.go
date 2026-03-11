@@ -24,11 +24,35 @@ const (
 	verifyLockDuration  = 10 * time.Minute
 )
 
+var (
+	// ErrEmailVerificationDisabled 表示服务端已关闭邮箱验证码流程。
+	ErrEmailVerificationDisabled = errors.New("email verification is disabled")
+	// ErrPhoneVerificationDisabled 表示服务端已关闭短信验证码流程。
+	ErrPhoneVerificationDisabled = errors.New("phone verification is disabled")
+)
+
+// AuthServiceOptions 定义认证服务可选开关。
+type AuthServiceOptions struct {
+	EmailVerificationEnabled bool // 是否启用邮箱验证码流程。
+	PhoneVerificationEnabled bool // 是否启用短信验证码流程。
+}
+
+// DefaultAuthServiceOptions 返回认证服务默认配置（默认关闭验证码流程以控制成本）。
+func DefaultAuthServiceOptions() AuthServiceOptions {
+	return AuthServiceOptions{
+		EmailVerificationEnabled: false,
+		PhoneVerificationEnabled: false,
+	}
+}
+
 // AuthService 负责认证与验证码流程。
 type AuthService struct {
 	userRepo   repository.UserRepository
 	verifyRepo repository.VerificationRepository
 	codeSender verificationcode.CodeProvider
+	// 验证开关用于按环境控制成本。关闭后 send/confirm 接口短路返回。
+	emailVerificationEnabled bool
+	phoneVerificationEnabled bool
 }
 
 // NewAuthService 创建认证服务。
@@ -36,15 +60,22 @@ func NewAuthService(
 	userRepo repository.UserRepository,
 	verifyRepo repository.VerificationRepository,
 	codeSender verificationcode.CodeProvider,
+	opts ...AuthServiceOptions,
 ) *AuthService {
 	if codeSender == nil {
 		codeSender = verificationcode.NewMockCodeProvider()
 	}
+	options := DefaultAuthServiceOptions()
+	if len(opts) > 0 {
+		options = opts[0]
+	}
 
 	return &AuthService{
-		userRepo:   userRepo,
-		verifyRepo: verifyRepo,
-		codeSender: codeSender,
+		userRepo:                 userRepo,
+		verifyRepo:               verifyRepo,
+		codeSender:               codeSender,
+		emailVerificationEnabled: options.EmailVerificationEnabled,
+		phoneVerificationEnabled: options.PhoneVerificationEnabled,
 	}
 }
 
@@ -113,6 +144,10 @@ func (s *AuthService) LoginGoogle(ctx context.Context, googleID, email, name, av
 
 // SendEmailVerificationCode 发送邮箱验证码。
 func (s *AuthService) SendEmailVerificationCode(ctx context.Context, userID uint) error {
+	if !s.emailVerificationEnabled {
+		return ErrEmailVerificationDisabled
+	}
+
 	user, err := s.userRepo.GetUserByID(ctx, userID)
 	if err != nil {
 		return err
@@ -161,6 +196,10 @@ func (s *AuthService) SendEmailVerificationCode(ctx context.Context, userID uint
 
 // VerifyEmailCode 校验邮箱验证码并更新用户状态。
 func (s *AuthService) VerifyEmailCode(ctx context.Context, userID uint, code string) error {
+	if !s.emailVerificationEnabled {
+		return ErrEmailVerificationDisabled
+	}
+
 	key := fmt.Sprintf("email:%d", userID)
 	now := time.Now()
 
@@ -204,6 +243,10 @@ func (s *AuthService) VerifyEmailCode(ctx context.Context, userID uint, code str
 
 // SendPhoneVerificationCode 发送短信验证码。
 func (s *AuthService) SendPhoneVerificationCode(ctx context.Context, userID uint, phone string) error {
+	if !s.phoneVerificationEnabled {
+		return ErrPhoneVerificationDisabled
+	}
+
 	normalized := utils.NormalizePhone(phone)
 	if !utils.IsValidE164(normalized) {
 		return errors.New("phone must be valid E.164 format")
@@ -257,6 +300,10 @@ func (s *AuthService) SendPhoneVerificationCode(ctx context.Context, userID uint
 
 // VerifyPhoneCode 校验短信验证码并更新用户状态。
 func (s *AuthService) VerifyPhoneCode(ctx context.Context, userID uint, phone string, code string) error {
+	if !s.phoneVerificationEnabled {
+		return ErrPhoneVerificationDisabled
+	}
+
 	normalized := utils.NormalizePhone(phone)
 	if !utils.IsValidE164(normalized) {
 		return errors.New("phone must be valid E.164 format")
