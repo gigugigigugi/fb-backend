@@ -38,6 +38,7 @@ func main() {
 	teamRepo := postgres.NewTeamRepository(db)
 	matchRepo := postgres.NewMatchRepository(db)
 	bookingRepo := postgres.NewBookingRepository(db)
+	venueRepo := postgres.NewVenueRepository(db)
 	verificationRepo := postgres.NewVerificationRepository(db)
 
 	notifyDispatcher := notification.NewDispatcher(256)
@@ -55,6 +56,7 @@ func main() {
 	teamSvc := service.NewTeamService(teamRepo)
 	authSvc := service.NewAuthService(userRepo, verificationRepo, codeProvider)
 	userSvc := service.NewUserService(userRepo)
+	venueSvc := service.NewVenueService(venueRepo)
 
 	if config.App.Env == "prod" {
 		gin.SetMode(gin.ReleaseMode)
@@ -70,7 +72,7 @@ func main() {
 	r.Use(middleware.RequestLogger())
 	r.Use(gin.Recovery())
 
-	router.SetupRouter(r, matchSvc, teamSvc, authSvc, userSvc)
+	router.SetupRouter(r, matchSvc, teamSvc, authSvc, userSvc, venueSvc)
 
 	slog.Debug("Server starting",
 		slog.String("port", config.App.Port),

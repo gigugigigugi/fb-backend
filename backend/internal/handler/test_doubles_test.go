@@ -104,6 +104,8 @@ func (s *stubMatchRepo) Transaction(ctx context.Context, fn func(txRepo reposito
 
 type stubBookingRepo struct {
 	getBookingsByMatchIDFn func(ctx context.Context, matchID uint) ([]*model.Booking, error)
+	settleMatchBookingsFn  func(ctx context.Context, matchID uint, paymentStatus string, bookingIDs []uint) (int64, error)
+	assignSubTeamsFn       func(ctx context.Context, matchID uint, assignments []repository.SubTeamAssignment) error
 }
 
 var _ repository.BookingRepository = (*stubBookingRepo)(nil)
@@ -140,6 +142,20 @@ func (s *stubBookingRepo) GetUserBookings(ctx context.Context, userID uint) ([]*
 	return nil, nil
 }
 
+func (s *stubBookingRepo) SettleMatchBookings(ctx context.Context, matchID uint, paymentStatus string, bookingIDs []uint) (int64, error) {
+	if s.settleMatchBookingsFn == nil {
+		panicUnexpectedHandlerCall("SettleMatchBookings")
+	}
+	return s.settleMatchBookingsFn(ctx, matchID, paymentStatus, bookingIDs)
+}
+
+func (s *stubBookingRepo) AssignSubTeams(ctx context.Context, matchID uint, assignments []repository.SubTeamAssignment) error {
+	if s.assignSubTeamsFn == nil {
+		panicUnexpectedHandlerCall("AssignSubTeams")
+	}
+	return s.assignSubTeamsFn(ctx, matchID, assignments)
+}
+
 func (s *stubBookingRepo) CancelBookingTransaction(ctx context.Context, bookingID uint, userID uint) (uint, []uint, error) {
 	panicUnexpectedHandlerCall("CancelBookingTransaction")
 	return 0, nil, nil
@@ -149,7 +165,9 @@ func (s *stubBookingRepo) Transaction(ctx context.Context, fn func(txRepo reposi
 	return fn(s)
 }
 
-type stubTeamRepo struct{}
+type stubTeamRepo struct {
+	isTeamAdminFn func(ctx context.Context, teamID uint, userID uint) (bool, error)
+}
 
 var _ repository.TeamRepository = (*stubTeamRepo)(nil)
 
@@ -164,6 +182,29 @@ func (s *stubTeamRepo) GetTeamByID(ctx context.Context, teamID uint) (*model.Tea
 }
 
 func (s *stubTeamRepo) IsTeamAdmin(ctx context.Context, teamID uint, userID uint) (bool, error) {
-	panicUnexpectedHandlerCall("IsTeamAdmin")
-	return false, nil
+	if s.isTeamAdminFn == nil {
+		panicUnexpectedHandlerCall("IsTeamAdmin")
+	}
+	return s.isTeamAdminFn(ctx, teamID, userID)
+}
+
+type stubVenueRepo struct {
+	getRegionStatsFn func(ctx context.Context) ([]repository.VenueRegionRow, error)
+	getMapVenuesFn   func(ctx context.Context, filter repository.VenueMapFilter) ([]*model.Venue, error)
+}
+
+var _ repository.VenueRepository = (*stubVenueRepo)(nil)
+
+func (s *stubVenueRepo) GetRegionStats(ctx context.Context) ([]repository.VenueRegionRow, error) {
+	if s.getRegionStatsFn == nil {
+		panicUnexpectedHandlerCall("GetRegionStats")
+	}
+	return s.getRegionStatsFn(ctx)
+}
+
+func (s *stubVenueRepo) GetVenuesForMap(ctx context.Context, filter repository.VenueMapFilter) ([]*model.Venue, error) {
+	if s.getMapVenuesFn == nil {
+		panicUnexpectedHandlerCall("GetVenuesForMap")
+	}
+	return s.getMapVenuesFn(ctx, filter)
 }

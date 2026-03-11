@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"football-backend/common/utils"
 	"football-backend/internal/repository"
 	"football-backend/internal/service"
@@ -133,4 +134,86 @@ func (h *MatchHandler) GetMatchDetails(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success", "data": detail})
+}
+
+// SettleMatch 处理赛后结算，更新报名记录的支付状态。
+func (h *MatchHandler) SettleMatch(c *gin.Context) {
+	matchID, ok := utils.GetParamID(c, "id")
+	if !ok {
+		return
+	}
+
+	userID, ok := utils.GetUserID(c)
+	if !ok {
+		return
+	}
+
+	var req struct {
+		PaymentStatus string `json:"payment_status" binding:"required"` // 目标支付状态：UNPAID/PAID/REFUNDED。
+		BookingIDs    []uint `json:"booking_ids"`                       // 可选：仅结算指定报名 ID。
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "Invalid parameters", "data": err.Error()})
+		return
+	}
+
+	updatedCount, err := h.matchSvc.SettleMatch(c.Request.Context(), matchID, userID, req.PaymentStatus, req.BookingIDs)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrInvalidPaymentStatus):
+			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": err.Error(), "data": nil})
+		case errors.Is(err, service.ErrMatchManageForbidden):
+			c.JSON(http.StatusForbidden, gin.H{"code": 403, "msg": err.Error(), "data": nil})
+		case errors.Is(err, service.ErrMatchNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": err.Error(), "data": nil})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "Failed to settle match", "data": err.Error()})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code": 0,
+		"msg":  "success",
+		"data": gin.H{
+			"updated_count": updatedCount,
+		},
+	})
+}
+
+// AssignSubTeams 处理赛后分队结果写入。
+func (h *MatchHandler) AssignSubTeams(c *gin.Context) {
+	matchID, ok := utils.GetParamID(c, "id")
+	if !ok {
+		return
+	}
+
+	userID, ok := utils.GetUserID(c)
+	if !ok {
+		return
+	}
+
+	var req struct {
+		Assignments []service.SubTeamAssignment `json:"assignments" binding:"required,min=1"` // 分队结果列表。
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "Invalid parameters", "data": err.Error()})
+		return
+	}
+
+	if err := h.matchSvc.AssignMatchSubTeams(c.Request.Context(), matchID, userID, req.Assignments); err != nil {
+		switch {
+		case errors.Is(err, service.ErrInvalidSubTeamAssignments):
+			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": err.Error(), "data": nil})
+		case errors.Is(err, service.ErrMatchManageForbidden):
+			c.JSON(http.StatusForbidden, gin.H{"code": 403, "msg": err.Error(), "data": nil})
+		case errors.Is(err, service.ErrMatchNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": err.Error(), "data": nil})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "Failed to assign subteams", "data": err.Error()})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success", "data": nil})
 }

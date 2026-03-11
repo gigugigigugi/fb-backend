@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"errors"
+	"fmt"
 	"football-backend/internal/model"
 	"football-backend/internal/repository"
 	"time"
@@ -82,6 +83,43 @@ func (r *bookingRepository) GetUserBookings(ctx context.Context, userID uint) ([
 		Order("created_at DESC").
 		Find(&bookings).Error
 	return bookings, err
+}
+
+// SettleMatchBookings 批量更新比赛报名的支付状态（仅处理 CONFIRMED 报名）。
+func (r *bookingRepository) SettleMatchBookings(ctx context.Context, matchID uint, paymentStatus string, bookingIDs []uint) (int64, error) {
+	query := r.db.WithContext(ctx).Model(&model.Booking{}).
+		Where("match_id = ? AND status = ?", matchID, "CONFIRMED")
+
+	if len(bookingIDs) > 0 {
+		query = query.Where("id IN ?", bookingIDs)
+	}
+
+	tx := query.Update("payment_status", paymentStatus)
+	if tx.Error != nil {
+		return 0, tx.Error
+	}
+	return tx.RowsAffected, nil
+}
+
+// AssignSubTeams 保存赛后分队结果；任一记录更新失败会回滚整批操作。
+func (r *bookingRepository) AssignSubTeams(ctx context.Context, matchID uint, assignments []repository.SubTeamAssignment) error {
+	return r.Transaction(ctx, func(txRepo repository.BookingRepository) error {
+		internalRepo := txRepo.(*bookingRepository)
+		txDB := internalRepo.db.WithContext(ctx)
+
+		for _, assignment := range assignments {
+			tx := txDB.Model(&model.Booking{}).
+				Where("id = ? AND match_id = ? AND status != ?", assignment.BookingID, matchID, "CANCELED").
+				Update("sub_team", assignment.SubTeam)
+			if tx.Error != nil {
+				return tx.Error
+			}
+			if tx.RowsAffected == 0 {
+				return fmt.Errorf("booking %d not found in this match or already canceled", assignment.BookingID)
+			}
+		}
+		return nil
+	})
 }
 
 // GetBookingWithLock 按 ID 查询报名并加行级锁。

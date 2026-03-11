@@ -140,6 +140,8 @@ type mockBookingRepo struct {
 	countWaitingPlayersFn      func(ctx context.Context, matchID uint) (int64, error)
 	getBookingsByMatchIDFn     func(ctx context.Context, matchID uint) ([]*model.Booking, error)
 	getUserBookingsFn          func(ctx context.Context, userID uint) ([]*model.Booking, error)
+	settleMatchBookingsFn      func(ctx context.Context, matchID uint, paymentStatus string, bookingIDs []uint) (int64, error)
+	assignSubTeamsFn           func(ctx context.Context, matchID uint, assignments []repository.SubTeamAssignment) error
 	cancelBookingTransactionFn func(ctx context.Context, bookingID uint, userID uint) (uint, []uint, error)
 	transactionFn              func(ctx context.Context, fn func(txRepo repository.BookingRepository) error) error
 }
@@ -188,6 +190,20 @@ func (m *mockBookingRepo) GetUserBookings(ctx context.Context, userID uint) ([]*
 	return m.getUserBookingsFn(ctx, userID)
 }
 
+func (m *mockBookingRepo) SettleMatchBookings(ctx context.Context, matchID uint, paymentStatus string, bookingIDs []uint) (int64, error) {
+	if m.settleMatchBookingsFn == nil {
+		panicUnexpectedCall("SettleMatchBookings")
+	}
+	return m.settleMatchBookingsFn(ctx, matchID, paymentStatus, bookingIDs)
+}
+
+func (m *mockBookingRepo) AssignSubTeams(ctx context.Context, matchID uint, assignments []repository.SubTeamAssignment) error {
+	if m.assignSubTeamsFn == nil {
+		panicUnexpectedCall("AssignSubTeams")
+	}
+	return m.assignSubTeamsFn(ctx, matchID, assignments)
+}
+
 func (m *mockBookingRepo) CancelBookingTransaction(ctx context.Context, bookingID uint, userID uint) (uint, []uint, error) {
 	if m.cancelBookingTransactionFn == nil {
 		panicUnexpectedCall("CancelBookingTransaction")
@@ -229,4 +245,25 @@ func (m *mockTeamRepo) IsTeamAdmin(ctx context.Context, teamID uint, userID uint
 		panicUnexpectedCall("IsTeamAdmin")
 	}
 	return m.isTeamAdminFn(ctx, teamID, userID)
+}
+
+type mockVenueRepo struct {
+	getRegionStatsFn func(ctx context.Context) ([]repository.VenueRegionRow, error)
+	getMapVenuesFn   func(ctx context.Context, filter repository.VenueMapFilter) ([]*model.Venue, error)
+}
+
+var _ repository.VenueRepository = (*mockVenueRepo)(nil)
+
+func (m *mockVenueRepo) GetRegionStats(ctx context.Context) ([]repository.VenueRegionRow, error) {
+	if m.getRegionStatsFn == nil {
+		panicUnexpectedCall("GetRegionStats")
+	}
+	return m.getRegionStatsFn(ctx)
+}
+
+func (m *mockVenueRepo) GetVenuesForMap(ctx context.Context, filter repository.VenueMapFilter) ([]*model.Venue, error) {
+	if m.getMapVenuesFn == nil {
+		panicUnexpectedCall("GetVenuesForMap")
+	}
+	return m.getMapVenuesFn(ctx, filter)
 }

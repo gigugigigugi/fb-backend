@@ -41,9 +41,8 @@
 2. `handler` 层测试已补核心新 API（成功/失败、状态码、响应结构）。
 3. 当前 `go test ./...` 可通过。
 
-## 5. 待完成项（P0/P1）
+## 5. 待完成项（P2）
 
-1. venues 接口：`/venues/regions`、`/venues/map`。
-2. 赛后接口：`/matches/:id/settlement`、`/matches/:id/subteams`。
-3. 真实通知 provider 的联调与验收（real 模式）。
-4. 集成测试与发布脚本收敛。
+1. 真实通知 provider 的联调与验收（real 模式）。
+2. 集成测试与发布脚本收敛。
+3. 前端落地与端到端联调。

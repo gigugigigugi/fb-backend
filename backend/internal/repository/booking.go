@@ -5,7 +5,13 @@ import (
 	"football-backend/internal/model"
 )
 
-// BookingRepository 定义报名与候补相关数据访问接口。
+// SubTeamAssignment 表示单条分队结果。
+type SubTeamAssignment struct {
+	BookingID uint   // 报名记录 ID。
+	SubTeam   string // 分队标识，例如 A/B。
+}
+
+// BookingRepository 定义报名与候补相关的数据访问接口。
 type BookingRepository interface {
 	CreateBooking(ctx context.Context, booking *model.Booking) error
 	HasUserBooked(ctx context.Context, matchID uint, userID uint) (bool, error)
@@ -13,9 +19,13 @@ type BookingRepository interface {
 	CountWaitingPlayers(ctx context.Context, matchID uint) (int64, error)
 	GetBookingsByMatchID(ctx context.Context, matchID uint) ([]*model.Booking, error)
 	GetUserBookings(ctx context.Context, userID uint) ([]*model.Booking, error)
+	SettleMatchBookings(ctx context.Context, matchID uint, paymentStatus string, bookingIDs []uint) (int64, error)
+	AssignSubTeams(ctx context.Context, matchID uint, assignments []SubTeamAssignment) error
+
 	// CancelBookingTransaction 返回：
-	// 1) matchID：供上层构造通知内容。
+	// 1) matchID：用于上层构造通知内容；
 	// 2) []uint：当前比赛 WAITING 用户 ID 列表（仅用于通知，不做自动转正）。
 	CancelBookingTransaction(ctx context.Context, bookingID uint, userID uint) (uint, []uint, error)
+
 	Transaction(ctx context.Context, fn func(txRepo BookingRepository) error) error
 }

@@ -12,7 +12,7 @@ import (
 )
 
 // SetupRouter 注册应用全部路由。
-func SetupRouter(r *gin.Engine, matchSvc *service.MatchService, teamSvc *service.TeamService, authSvc *service.AuthService, userSvc *service.UserService) {
+func SetupRouter(r *gin.Engine, matchSvc *service.MatchService, teamSvc *service.TeamService, authSvc *service.AuthService, userSvc *service.UserService, venueSvc *service.VenueService) {
 	env := config.App.Env
 
 	r.GET("/", func(c *gin.Context) {
@@ -39,6 +39,7 @@ func SetupRouter(r *gin.Engine, matchSvc *service.MatchService, teamSvc *service
 	teamHandler := handler.NewTeamHandler(teamSvc)
 	bookingHandler := handler.NewBookingHandler(matchSvc)
 	userHandler := handler.NewUserHandler(userSvc)
+	venueHandler := handler.NewVenueHandler(venueSvc)
 
 	// 公开认证接口。
 	auth := api.Group("/auth")
@@ -52,6 +53,12 @@ func SetupRouter(r *gin.Engine, matchSvc *service.MatchService, teamSvc *service
 	publicMatches := api.Group("/matches")
 	{
 		publicMatches.GET("", matchHandler.GetMatches)
+	}
+
+	publicVenues := api.Group("/venues")
+	{
+		publicVenues.GET("/regions", venueHandler.GetRegions)
+		publicVenues.GET("/map", venueHandler.GetMap)
 	}
 
 	// 鉴权中间件：支持配置开关的开发绕过。
@@ -87,6 +94,8 @@ func SetupRouter(r *gin.Engine, matchSvc *service.MatchService, teamSvc *service
 	{
 		matches.POST("/batch", matchHandler.CreateBatch)
 		matches.GET("/:id/details", matchHandler.GetMatchDetails)
+		matches.POST("/:id/settlement", matchHandler.SettleMatch)
+		matches.POST("/:id/subteams", matchHandler.AssignSubTeams)
 	}
 
 	bookings := api.Group("/bookings")
